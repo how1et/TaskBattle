@@ -1,0 +1,27 @@
+name: Delete expired TaskBattle data
+on:
+  schedule:
+    - cron: '17 * * * *'
+  workflow_dispatch:
+permissions: {}
+concurrency:
+  group: taskbattle-cleanup
+  cancel-in-progress: false
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Clean expired rooms and photographs
+        env:
+          TASKBATTLE_URL: ${{ vars.TASKBATTLE_URL }}
+        run: |
+          test -n "$TASKBATTLE_URL" || { echo 'Set repository variable TASKBATTLE_URL to the public HTTPS origin'; exit 1; }
+          case "$TASKBATTLE_URL" in https://*) ;; *) exit 1 ;; esac
+          for batch in 1 2 3 4 5; do
+            result=$(curl --fail-with-body --silent --show-error --max-time 60 --request POST "${TASKBATTLE_URL%/}/api/cleanup")
+            echo "$result"
+            count=$(printf '%s' "$result" | jq '.deletedFiles')
+            if [ "$count" -lt 500 ]; then exit 0; fi
+            sleep 65
+          done
