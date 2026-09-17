@@ -77,9 +77,11 @@ function imageType(a: Uint8Array) { if (a.length < 12)
     return 'image/jpeg'; if ([137, 80, 78, 71, 13, 10, 26, 10].every((v, i) => a[i] === v))
     return 'image/png'; if (String.fromCharCode(...a.slice(0, 4)) === 'RIFF' && String.fromCharCode(...a.slice(8, 12)) === 'WEBP')
     return 'image/webp'; return null; }
-async function createRoom(req: Request, ip: string) {
-    await limit('create:' + ip, 5, 3600000);
-    await limit('create:global', 100, 86400000);
+type RequestTrace = { id: string; phase: string; started: number };
+async function createRoom(req: Request, ip: string, trace: RequestTrace) {
+    trace.phase = 'parse-upload';
+    if (Number(req.headers.get('content-length')) > 19 * 1024 * 1024)
+        fail(413, 'Не больше 18 МБ фотографий на комнату.');
     if (!req.headers.get('content-type')?.startsWith('multipart/form-data'))
         fail(415, 'Нужны фотографии JPEG, PNG или WebP.');
     let bytes = 0;
@@ -88,6 +90,7 @@ async function createRoom(req: Request, ip: string) {
     if (!stream)
         fail(400, 'Добавьте фотографии.');
     const form = await new Response(stream, { headers: { 'content-type': req.headers.get('content-type')! } }).formData();
+    trace.phase = 'validate-room';
     const requestId = String(form.get('requestId') || '');
     const teacherKey = String(form.get('teacherKey') || '');
     if (!validId(requestId) || !validKey(teacherKey))
@@ -100,6 +103,8 @@ async function createRoom(req: Request, ip: string) {
         await room(existing.id);
         return { roomId: existing.id, teacherKey, expiresAt: existing.expires_at };
     }
+    await limit('create:' + ip, 5, 3600000);
+    await limit('create:global', 100, 86400000);
     const title = String(form.get('title') || '').trim() || 'Занятие без названия';
     if (title.length > 100)
         fail(400, 'Название — не больше 100 символов.');
@@ -138,6 +143,7 @@ async function createRoom(req: Request, ip: string) {
     const keys: string[] = [];
     const taskRows: Task[] = [];
     try {
+        trace.phase = 'store-photos';
         for (let i = 0; i < checked.length; i++) {
             const t = random(), key = `rooms/${roomId}/${t}`;
             keys.push(key);
@@ -145,6 +151,7 @@ async function createRoom(req: Request, ip: string) {
             await bucket().put(key, checked[i].file.stream(), { httpMetadata: { contentType: checked[i].mime } });
             taskRows.push({ id: t, room_id: roomId, ordinal: i + 1, file_key: key, mime: checked[i].mime, answer: String(values[i]).trim() });
         }
+        trace.phase = 'commit-room';
         await db().batch([sql('INSERT INTO rooms (id,request_id,title,teacher_hash,created_at,expires_at,count) VALUES (?,?,?,?,?,?,?)', roomId, requestId, title, teacherHash, now, expires, files.length), ...taskRows.map(t => sql('INSERT INTO tasks (id,room_id,ordinal,file_key,mime,answer) VALUES (?,?,?,?,?,?)', t.id, roomId, t.ordinal, t.file_key, t.mime, t.answer)), ...keys.map(k => sql('UPDATE blobs SET expires_at=? WHERE key=?', expires, k))]);
     }
     catch (error) {
@@ -262,6 +269,7 @@ export async function cleanup() { const now = Date.now(); const expired = (await
     await db().batch(expired.map(o => sql('DELETE FROM blobs WHERE key=? AND expires_at<=?', o.key, now))); await sql('DELETE FROM rooms WHERE expires_at<=? AND NOT EXISTS (SELECT 1 FROM tasks JOIN blobs ON blobs.key=tasks.file_key WHERE tasks.room_id=rooms.id)', now).run(); await sql('DELETE FROM rate_limits WHERE expires_at<=?', now).run(); return { ok: true, deletedFiles: expired.length }; }
 const headers = { 'Cache-Control': 'private, no-store', 'Referrer-Policy': 'no-referrer', 'X-Content-Type-Options': 'nosniff', 'Cross-Origin-Resource-Policy': 'same-origin' };
 export async function handle(req: Request) {
+    const trace: RequestTrace = { id: crypto.randomUUID(), phase: 'request', started: Date.now() };
     try {
         const url = new URL(req.url);
         const p = url.pathname.split('/').filter(Boolean).slice(1);
@@ -280,7 +288,15 @@ export async function handle(req: Request) {
             result = await cleanup();
         }
         else if (p[0] === 'rooms' && p.length === 1 && method === 'POST')
-            result = await createRoom(req, ip);
+            result = await createRoom(req, ip, trace);
+        else if (p[0] === 'creations' && p.length === 2 && method === 'GET') {
+            const key = req.headers.get('x-teacher-key') || '';
+            if (!validId(p[1]) || !validKey(key)) fail(404, 'Создание комнаты не найдено.');
+            const saved = await sql('SELECT * FROM rooms WHERE request_id=? AND teacher_hash=?', p[1], await hash(key)).first<Room>();
+            if (!saved) fail(404, 'Создание комнаты не найдено.');
+            const r = await room(saved!.id);
+            result = { roomId: r.id, teacherKey: key, expiresAt: r.expires_at };
+        }
         else if (p[0] === 'rooms' && p[1]) {
             const r = await room(p[1]);
             if (p.length === 2 && method === 'GET')
@@ -326,7 +342,7 @@ export async function handle(req: Request) {
     catch (e) {
         if (e instanceof HttpError)
             return Response.json({ error: e.message }, { status: e.status, headers });
-        console.error('TaskBattle request failed', e instanceof Error ? e.name : 'unknown');
-        return Response.json({ error: 'Не удалось связаться с сервером. Введённые данные сохранены — повторите запрос.' }, { status: 503, headers });
+        console.error(JSON.stringify({ event: 'taskbattle-request-failed', traceId: trace.id, phase: trace.phase, elapsedMs: Date.now() - trace.started, errorName: e instanceof Error ? e.name : 'unknown' }));
+        return Response.json({ error: 'Не удалось связаться с сервером. Введённые данные сохранены — повторите запрос.', traceId: trace.id }, { status: 503, headers });
     }
 }

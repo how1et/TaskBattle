@@ -88,6 +88,18 @@ const pictures = new Map<string, {
     expires: number;
     promise: Promise<string>;
 }>();
-export function loadPhoto(path: string, expires: number) { const existing = pictures.get(path); if (existing && existing.expires > Date.now())
-    return existing.promise; const promise = fetch(path, { cache: 'no-store' }).then(async (r) => { if (!r.ok)
-    throw new ApiError(r.status === 410 ? 'Срок действия комнаты истёк' : 'Не удалось загрузить фотографию. Проверьте связь.', r.status); return URL.createObjectURL(await r.blob()); }).catch(e => { pictures.delete(path); throw e; }); pictures.set(path, { expires, promise }); return promise; }
+export function loadPhoto(path: string, expires: number) {
+    const existing = pictures.get(path);
+    if (existing && existing.expires > Date.now()) return existing.promise;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 45000);
+    const promise = fetch(path, { cache: 'no-store', signal: controller.signal }).then(async r => {
+        if (!r.ok) throw new ApiError(r.status === 410 ? 'Срок действия комнаты истёк' : 'Не удалось загрузить фотографию. Проверьте связь и повторите загрузку.', r.status);
+        return URL.createObjectURL(await r.blob());
+    }).catch(error => {
+        pictures.delete(path);
+        throw error instanceof ApiError ? error : new ApiError('Связь прервалась при загрузке фотографии. Проверьте интернет и повторите загрузку.', 0);
+    }).finally(() => clearTimeout(timeout));
+    pictures.set(path, { expires, promise });
+    return promise;
+}
