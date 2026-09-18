@@ -2,7 +2,7 @@
 import {Frame, Photo, Share, Report} from "@/components/quest-presentation";
 import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { ArrowRight, Check, RotateCw, ArrowLeft, Hourglass, Swords, ScrollText, ShieldCheck, Gem } from 'lucide-react';
+import { ArrowRight, Check, RotateCw, ArrowLeft, Hourglass, Swords, ScrollText, Gem } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Progress } from '@/components/ui/progress';
@@ -122,17 +122,16 @@ export default function Battle({ view }: {
     catch { } return () => lifecycle.abort(); }, [kind, id]);
     if (expired) return <Frame><div className="panel state-card stack"><Hourglass size={38}/><h1>Срок действия комнаты истёк</h1><p className="muted">Прошло 48 часов. Попросите преподавателя создать новое занятие.</p><a className="link-text" href="/">На главную</a></div></Frame>;
     if (!data) return <Frame><div className="panel state-card stack">{error?<><ScrollText size={34}/><h1>Не удалось открыть занятие</h1><p role="alert" className="error">{error}</p><Button className="secondary" variant="outline" onClick={refresh}>Повторить</Button></>:<><p role="status">Загружаем занятие…</p><Skeleton className="h-10 w-3/4"/><Skeleton className="h-60 w-full"/></>}</div></Frame>;
-    const common=<>{error&&<div className="error" role="alert">{error}{kind==='attempt'&&<Button variant="outline" className="secondary" onClick={refresh}>Продолжить с сохранённого места</Button>}</div>}{photoError&&<div className="error" role="alert">{photoError}<Button variant="outline" className="secondary" onClick={()=>{setData(null);void refresh();}}>Повторить загрузку фото</Button></div>}</>;
-    if (kind==='room') return <Frame><div className="panel start-card">
-        <div className="start-content"><p className="eyebrow">НАЧАТЬ ИСПЫТАНИЕ</p><h1>{data.title}</h1>
-            <div className="start-count"><span className="start-number">{data.count}</span><span className="muted">{data.count===1?'задача':data.count<5?'задачи':'задач'}<br/>в случайном порядке</span></div>
-            <ol className="start-rules"><li><Swords size={19}/><span>Нажмите «Старт» — начнётся отсчёт.</span></li><li><ScrollText size={19}/><span>Решайте по одной задаче и вводите короткий ответ.</span></li><li><ShieldCheck size={19}/><span>Разбор всех ответов появится в конце.</span></li></ol>
-            <p className="notice">Таймер идёт и во время перерывов. Сетевые задержки тоже входят во время.</p>
-            {common}<Button className="primary start-button" disabled={busy||!loaded} onClick={start}><Swords size={24}/>{busy?'Запускаем…':loaded?'Старт':'Загружаем фотографии…'}</Button>
-            <p className="start-expiry">Доступ до {date(data.expiresAt)}</p>
+    const common=<>{error&&<div className="error" role="alert">{error}{kind==='attempt'&&<Button variant="outline" className="secondary" onClick={refresh}>Продолжить</Button>}</div>}{photoError&&<div className="error" role="alert">{photoError}<Button variant="outline" className="secondary" onClick={()=>{setData(null);void refresh();}}>Повторить загрузку фото</Button></div>}</>;
+    if (kind==='room') return <Frame><section className="start-scene" aria-label="Начать испытание">
+        <div className="start-title"><p className="eyebrow">ТВОЁ ИСПЫТАНИЕ</p><h1>{data.title}</h1></div>
+        <div className="guide-portrait"><img className="character-art" src="/images/adventure-guide.webp" width="640" height="640" alt="Искатель приключений приглашает начать испытание" fetchPriority="high"/></div>
+        <div className="start-invitation"><p className="guide-line">Пора в путь.<br/><span>Все задачи тебе по силам!</span></p>
+            <div className="start-count"><span className="start-number">{data.count}</span><span>{data.count===1?'задача':data.count<5?'задачи':'задач'}</span></div>
+            {common}<Button className="primary start-button" disabled={busy||!loaded} onClick={start}><Swords size={25}/>{busy?'Запускаем…':loaded?'Старт':'Загружаем фотографии…'}</Button>
         </div>
-        <div className="start-art" aria-hidden="true"><img src="/images/quest-landscape.webp" width="1200" height="800" alt=""/><img className="start-emblem" src="/images/quest-emblem.webp" width="125" height="125" alt=""/></div>
-    </div></Frame>;
+        <p className="start-expiry">Доступ до {date(data.expiresAt)}</p>
+    </section></Frame>;
     if(kind==='teacher'&&!reportId) return <Frame><div className="stack">
         <div className="teacher-heading"><img src="/images/quest-emblem.webp" width="75" height="85" alt=""/><div><p className="eyebrow"><Check size={14}/>КОМНАТА ГОТОВА</p><h1>{data.title}</h1><p className="teacher-meta">Задач: {data.count}<span aria-hidden="true">·</span>Доступ до {date(data.expiresAt)}</p></div></div>
         <div className="copy-grid"><Share title="Ссылка для ученика" value={origin+'/room/'+id}/><Share title="Секретная ссылка преподавателя" value={origin+'/teacher/'+id+'#'+key} secret/></div>
@@ -149,7 +148,7 @@ export default function Battle({ view }: {
         {photos[task.id]?<Photo src={photos[task.id]} label={'Задача '+(a.position+1)}/>:<Skeleton className="h-64 w-full"/>}
         <form className="answer-form" onSubmit={e=>{e.preventDefault();void submit();}}>
             <Input ref={input} className="text-input" aria-label="Ваш ответ" placeholder="Ваш ответ" autoComplete="off" autoCapitalize="off" autoCorrect="off" spellCheck={false} inputMode="text" enterKeyHint="send" maxLength={200} value={answer} disabled={busy||pending||!photos[task.id]} onChange={e=>{setAnswer(e.target.value);writeLocal('draft:'+a.attemptId+':'+a.position,{answer:e.target.value});}}/>
-            <Button type="submit" className="primary" disabled={busy||!answer.trim()||!photos[task.id]}>{busy?'Сохраняем…':pending?'Повторить отправку':'Ответить'}<ArrowRight size={19}/></Button>
-        </form>{common}<p className="time-note solve-note">Enter — отправить ответ. Результаты — после последней задачи.</p>
+            <Button type="submit" className="primary" disabled={busy||!answer.trim()||!photos[task.id]}>{busy?'Отправляем…':pending?'Повторить отправку':'Ответить'}<ArrowRight size={19}/></Button>
+        </form>{common}
     </div></Frame>;
 }

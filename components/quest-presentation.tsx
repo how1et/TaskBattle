@@ -41,13 +41,21 @@ export function Share({title,value,secret=false}:{title:string;value:string;secr
 
 export function Report({data,photos}:{data:AttemptData;photos:Record<string,string>}) {
     const s=data.summary!;
-    return <div className="stack">
-        <section className="result-scroll" aria-label="Итоги попытки">
-            <div className="result-heading"><div><p className="eyebrow">ИСПЫТАНИЕ ЗАВЕРШЕНО</p><h1>Свиток результатов</h1><p className="muted">{data.title}<br/>Начало: {date(data.startedAt)}</p></div><img src="/images/quest-emblem.webp" width="101" height="101" alt=""/></div>
-            <div className="stat-grid">
-                <div className="stat"><CircleCheck size={23}/><strong>{s.correct} из {s.count}</strong><span>Правильных ответов</span></div>
-                <div className="stat"><Hourglass size={23}/><strong>{duration(s.totalMs)}</strong><span>Общее время</span></div>
-                <div className="stat"><Timer size={23}/><strong>{duration(s.averageMs)}</strong><span>В среднем на задачу</span></div>
+    const mentorMessage = s.correct === s.count
+        ? 'Без единой ошибки! Испытание пройдено.'
+        : s.correct / s.count < 0.5
+            ? 'Испытание завершено. Разберём задачи — и можно попробовать снова.'
+            : `Верных ответов: ${s.correct} из ${s.count}. Давай разберём остальные задачи.`;
+    return <div className="stack report-layout">
+        <section className="result-scene" aria-label="Итоги попытки">
+            <div className="result-heading"><p className="eyebrow">{data.title}</p><h1>Испытание завершено</h1><p className="result-date">Начало: {date(data.startedAt)}</p></div>
+            <div className="mentor-scene">
+                <img className="character-art mentor-art" src="/images/wizard-mentor.webp" width="640" height="640" alt="Волшебник-наставник с книгой"/>
+                <div className="mentor-message"><span className="mentor-label">НАСТАВНИК</span><p>{mentorMessage}</p></div>
+            </div>
+            <div className="result-numbers">
+                <div className="score-stat"><CircleCheck size={24}/><span>Правильных ответов</span><strong>{s.correct}<span> / {s.count}</span></strong></div>
+                <div className="time-stats"><div className="time-stat"><Hourglass size={20}/><span>Общее время</span><strong>{duration(s.totalMs)}</strong></div><div className="time-stat"><Timer size={20}/><span>В среднем на задачу</span><strong>{duration(s.averageMs)}</strong></div></div>
             </div>
             <div className="extrema"><div><Gauge size={20}/><div><strong>Быстрее всего</strong><p>№ {s.fastest.ordinals.join(', ')} · {duration(s.fastest.durationMs)}</p></div></div><div><Hourglass size={20}/><div><strong>Больше всего времени</strong><p>№ {s.slowest.ordinals.join(', ')} · {duration(s.slowest.durationMs)}</p></div></div></div>
         </section>

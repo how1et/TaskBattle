@@ -233,13 +233,13 @@ async function submit(req: Request, a: Attempt, r: Room) {
     }>();
     if (prior) {
         if (prior.answer !== data.answer.trim() || prior.position !== data.position || prior.task_id !== data.taskId)
-            fail(409, 'Ранее был отправлен другой ответ. Продолжите с сохранённого места.');
+            fail(409, 'Уже принят другой ответ. Нажмите «Продолжить».');
         const fresh = await sql('SELECT * FROM attempts WHERE id=?', a.id).first<Attempt>();
         return snapshot(fresh!, r);
     }
     const ids: string[] = JSON.parse(a.order_json);
     if (a.finished_at !== null || data.position !== a.position || data.taskId !== ids[a.position])
-        fail(409, 'Ответ уже отправлен. Продолжите с сохранённого места.');
+        fail(409, 'Ответ уже принят. Нажмите «Продолжить».');
     const task = await sql('SELECT answer FROM tasks WHERE id=? AND room_id=?', data.taskId, r.id).first<{
         answer: string;
     }>();
@@ -257,7 +257,7 @@ async function submit(req: Request, a: Attempt, r: Room) {
         task_id: string;
     }>();
     if (!saved || saved.request_id !== data.requestId || saved.answer !== data.answer.trim() || saved.task_id !== data.taskId)
-        fail(409, 'Ранее был отправлен другой ответ. Продолжите с сохранённого места.');
+        fail(409, 'Уже принят другой ответ. Нажмите «Продолжить».');
     const updated = await sql('SELECT * FROM attempts WHERE id=?', a.id).first<Attempt>();
     await room(r.id);
     return snapshot(updated!, r);

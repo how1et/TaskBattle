@@ -3,7 +3,7 @@ import { SiteHeader } from "@/components/site-header";
 import { useEffect, useRef, useState } from "react";
 import { uploadRoom, recoverRoom, UploadError } from "@/lib/room-upload";
 import { readLocal, writeLocal } from "@/lib/client";
-import { Trash2, ArrowRight, Hourglass, ShieldCheck, ScrollText, Check } from "lucide-react";
+import { Trash2, ArrowRight, Hourglass, ShieldCheck, Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 type Draft = {
@@ -88,7 +88,7 @@ export default function Home() {
         <SiteHeader/>
         <main className="workspace creator-workspace">
             <div className="page-heading">
-                <div><p className="eyebrow">ПОДГОТОВКА К ПРИКЛЮЧЕНИЮ</p><h1>Новое занятие</h1><p className="muted">Соберите задачи и пригласите ученика.</p></div>
+                <div><p className="eyebrow">ПРЕПОДАВАТЕЛЮ</p><h1>Подготовка комнаты</h1></div>
                 <div className="duration-tag"><Hourglass size={21}/><span>Комната на <b>48 часов</b></span></div>
             </div>
             <div className="creator-grid">
@@ -117,10 +117,9 @@ export default function Home() {
                 <aside className="sidebar">
                     <div className="adventure-card">
                         <img src="/images/quest-landscape.webp" className="adventure-landscape" width="768" height="512" alt="Замок над озером в ночных горах"/>
-                        <div className="adventure-caption"><span className="eyebrow">TASKBATTLE</span><h2>Каждая задача —<br/>шаг вперёд</h2></div>
                     </div>
-                    <div className="guide-card"><h3><ScrollText size={19}/>Ваш следующий шаг</h3><ol className="steps"><li><span>1</span><p>Создайте комнату с задачами.</p></li><li><span>2</span><p>Отправьте ученику приглашение.</p></li><li><span>3</span><p>Откройте результаты по секретной ссылке.</p></li></ol></div>
                     <div className="rules-card"><h3><ShieldCheck size={20}/>Правила проверки</h3><p>Пробелы по краям и регистр не важны. 5, 5.0 и 5,00 — один ответ; − и - равнозначны.</p><p>Выражения сравниваются буквально: 1/2 и 0.5 — разные ответы.</p></div>
+                    <p className="room-lifetime"><Hourglass size={18}/>Комната и результаты доступны 48 часов.</p>
                 </aside>
             </div>
         </main>
