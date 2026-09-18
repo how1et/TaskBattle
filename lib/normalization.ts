@@ -15,7 +15,8 @@ export function summarize(rows: {
     durationMs: number;
     ordinal: number;
     correct: boolean;
-}[], totalMs: number) {
+}[], _legacyTotalMs?: number) {
+    const totalMs = rows.reduce((sum, row) => sum + row.durationMs, 0);
     const min = Math.min(...rows.map(r => r.durationMs));
     const max = Math.max(...rows.map(r => r.durationMs));
     return { totalMs, averageMs: totalMs / rows.length, correct: rows.filter(r => r.correct).length, count: rows.length, fastest: { ordinals: rows.filter(r => r.durationMs === min).map(r => r.ordinal), durationMs: min }, slowest: { ordinals: rows.filter(r => r.durationMs === max).map(r => r.ordinal), durationMs: max } };

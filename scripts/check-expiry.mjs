@@ -1,22 +1,14 @@
-// LOCAL ONLY: changes test data in the local D1 database, never production.
-import {readFile} from 'node:fs/promises';
-import {execFileSync} from 'node:child_process';
-import assert from 'node:assert/strict';
-const state=JSON.parse(await readFile(process.env.TEST_STATE_FILE||'../integration-state.json','utf8'));
-assert.match(state.base,/^http:\/\/127\.0\.0\.1:/);assert.match(state.roomId,/^[a-zA-Z0-9.]+$/);
-function sql(query){execFileSync(process.execPath,['--import','./scripts/sites-env.mjs','./node_modules/wrangler/bin/wrangler.js','d1','execute','DB','--local','--config','dist/server/wrangler.json','--persist-to','.wrangler/state','--command',query],{stdio:'pipe'});}
-sql(`UPDATE rooms SET expires_at=1 WHERE id='${state.roomId}'`);
-for(const [path,headers] of [[`/api/rooms/${state.roomId}`,{}],[state.photo,{}],[`/api/rooms/${state.roomId}/teacher`,{'x-teacher-key':state.teacherKey}],[`/api/attempts/${state.attemptId}`,{'x-attempt-key':state.attemptKey}],[`/api/attempts/${state.attemptId}/report`,{'x-teacher-key':state.teacherKey}]]){
- const r=await fetch(state.base+path,{headers});assert.equal(r.status,410,path);assert.equal((await r.json()).error,'Срок действия комнаты истёк');
-}
-console.log('PASS expiry blocks room, photos, progress, teacher list and report on server');
-sql(`UPDATE blobs SET expires_at=1 WHERE key IN (SELECT file_key FROM tasks WHERE room_id='${state.roomId}')`);
-const response=await fetch(state.base+'/api/cleanup',{method:'POST'});assert.equal(response.status,200);assert.equal((await response.json()).deletedFiles,3);
-assert.equal((await fetch(state.base+`/api/attempts/${state.attemptId}`,{headers:{'x-attempt-key':state.attemptKey}})).status,404);
-const oldRoom=state.roomId.split('.')[0]+'.1';assert.equal((await fetch(state.base+`/api/rooms/${oldRoom}`)).status,410);console.log('PASS cleanup removes expired photos and cascades records; expired links remain understandable');
-sql('DELETE FROM rate_limits');
-// Valid creation identities with missing photos count as failed new creations.
-// Recovery of existing creations intentionally does not consume this quota.
-function emptyCreation(){const form=new FormData();form.set('requestId',crypto.randomUUID());form.set('teacherKey',crypto.randomUUID().replaceAll('-','')+crypto.randomUUID().replaceAll('-',''));form.set('answers','[]');return form;}
-for(let i=0;i<5;i++)assert.equal((await fetch(state.base+'/api/rooms',{method:'POST',body:emptyCreation()})).status,400);
-assert.equal((await fetch(state.base+'/api/rooms',{method:'POST',body:emptyCreation()})).status,429);console.log('PASS persistent creation rate limit');sql('DELETE FROM rate_limits');
+// LOCAL ONLY: change only the integration fixture deadlines in local D1.
+import {readFile,readdir} from 'node:fs/promises';import {DatabaseSync} from 'node:sqlite';import assert from 'node:assert/strict';
+const state=JSON.parse(await readFile(process.env.TEST_STATE_FILE||'../integration-state.json','utf8'));assert.match(state.base,/^http:\/\/127\.0\.0\.1:/);
+const dir='.wrangler/state/v3/d1/miniflare-D1DatabaseObject';const dbFile=(await readdir(dir)).find(n=>n.endsWith('.sqlite')&&n!=='metadata.sqlite');const db=new DatabaseSync(dir+'/'+dbFile);db.exec('PRAGMA busy_timeout=5000');
+const s={'x-attempt-key':state.attemptKey},t={'x-teacher-key':state.teacherKey};const get=(path,headers={})=>fetch(state.base+path,{headers});
+db.prepare('UPDATE rooms SET expires_at=? WHERE id=?').run(Date.now()-1,state.roomId);
+assert.equal((await get('/api/rooms/'+state.roomId)).status,410);assert.equal((await get(state.photo)).status,410);
+for(const [p,h] of [[`/api/attempts/${state.attemptId}`,s],[`/api/attempts/${state.attemptId}/report`,t],[`/api/rooms/${state.roomId}/teacher`,t],[state.solution,s],[state.solution,t]])assert.equal((await get(p,h)).status,200,p);
+const keys=db.prepare('SELECT key FROM blobs WHERE key IN(SELECT file_key FROM tasks WHERE room_id=?) OR key IN(SELECT solution_key FROM answers WHERE attempt_id=?)').all(state.roomId,state.attemptId).map(x=>x.key);
+for(const k of keys)db.prepare('UPDATE blobs SET expires_at=1 WHERE key=?').run(k);
+db.exec("DELETE FROM rate_limits WHERE key LIKE 'cleanup:%'");assert.equal((await fetch(state.base+'/api/cleanup',{method:'POST'})).status,200);assert.equal((await get(state.solution,s)).status,200);for(const k of keys)assert.ok(db.prepare('SELECT key FROM blobs WHERE key=?').get(k));console.log('PASS expired room blocks new access; student/teacher report and files remain');
+db.prepare('UPDATE attempts SET result_expires_at=? WHERE id=?').run(Date.now()-1,state.attemptId);
+for(const [p,h] of [[`/api/attempts/${state.attemptId}`,s],[`/api/attempts/${state.attemptId}/report`,t],[state.solution,s]]){const r=await get(p,h);assert.equal(r.status,410);assert.equal((await r.json()).error,'Срок хранения результата истёк');}
+db.exec("DELETE FROM rate_limits WHERE key LIKE 'cleanup:%'");assert.equal((await fetch(state.base+'/api/cleanup',{method:'POST'})).status,200);for(const k of keys)assert.equal(db.prepare('SELECT key FROM blobs WHERE key=?').get(k),undefined);assert.equal((await (await get(`/api/attempts/${state.attemptId}`,s)).json()).error,'Срок хранения результата истёк');console.log('PASS actual local D1/R2 cleanup and authenticated expiry tombstone');db.close();

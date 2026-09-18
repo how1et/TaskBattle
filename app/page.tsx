@@ -52,8 +52,8 @@ export default function Home() {
         return () => window.removeEventListener('beforeunload', warn);
     }, [tasks.length]);
     function add(files: FileList | null) { if (!files)
-        return; setError(""); const list = Array.from(files); if (tasks.length + list.length > 12) {
-        setError("Можно добавить не больше 12 задач.");
+        return; setError(""); const list = Array.from(files); if (tasks.length + list.length > 25) {
+        setError("Можно добавить не больше 25 задач.");
         return;
     } if (list.some(f => !["image/jpeg", "image/png", "image/webp"].includes(f.type))) {
         setError("Поддерживаются только JPEG, PNG и WebP. HEIC и PDF сначала преобразуйте в изображение.");
@@ -95,11 +95,11 @@ export default function Home() {
                 <section className="panel editor" aria-label="Подготовка занятия">
                     <div className="section-title"><span className="step">01</span><h2>Название занятия</h2><span className="muted small">необязательно</span></div>
                     <Input className="text-input" aria-label="Название занятия" placeholder="Например, квадратные уравнения" maxLength={100} value={title} onChange={e => { resetCreation(); setTitle(e.target.value); }} disabled={busy}/>
-                    <div className="section-title task-title"><span className="step">02</span><h2>Задачи</h2><span className="counter">{tasks.length} / 12</span></div>
+                    <div className="section-title task-title"><span className="step">02</span><h2>Задачи</h2><span className="counter">{tasks.length} / 25</span></div>
                     <label className={'upload-area ' + (busy ? 'disabled' : '')} onDragOver={e => e.preventDefault()} onDrop={e => { e.preventDefault(); if (!busy) add(e.dataTransfer.files); }}>
                         <input aria-label="Загрузить фотографии задач" type="file" accept="image/jpeg,image/png,image/webp" multiple disabled={busy} onChange={e => { add(e.target.files); e.target.value = ""; }}/>
                         <img className="upload-book" src="/images/spellbook.webp" width="112" height="112" alt=""/>
-                        <div className="upload-copy"><strong>Добавить задачи</strong><span>Выберите фотографии или перетащите сюда</span><small>JPEG, PNG, WebP · до 3 МБ на файл<br/>До 12 задач и 18 МБ на комнату</small></div>
+                        <div className="upload-copy"><strong>Добавить задачи</strong><span>Выберите фотографии или перетащите сюда</span><small>JPEG, PNG, WebP · до 3 МБ и 40 Мп на файл<br/>До 25 задач и 18 МБ на комнату</small></div>
                     </label>
                     {tasks.length > 0 && <div className="draft-list">{tasks.map((task, i) => <div className="draft-task" key={task.id}>
                         <div className="draft-photo"><img src={task.url} alt={'Задача ' + (i + 1)}/><span>{String(i+1).padStart(2,'0')}</span></div>
@@ -119,7 +119,7 @@ export default function Home() {
                         <img src="/images/quest-landscape.webp" className="adventure-landscape" width="768" height="512" alt="Замок над озером в ночных горах"/>
                     </div>
                     <div className="rules-card"><h3><ShieldCheck size={20}/>Правила проверки</h3><p>Пробелы по краям и регистр не важны. 5, 5.0 и 5,00 — один ответ; − и - равнозначны.</p><p>Выражения сравниваются буквально: 1/2 и 0.5 — разные ответы.</p></div>
-                    <p className="room-lifetime"><Hourglass size={18}/>Комната и результаты доступны 48 часов.</p>
+                    <p className="room-lifetime"><Hourglass size={18}/>Комната — 48 часов. Отчёт — 72 часа после завершения.</p>
                 </aside>
             </div>
         </main>

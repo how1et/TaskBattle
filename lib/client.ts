@@ -8,6 +8,9 @@ export type RoomData = {
     title: string;
     count: number;
     expiresAt: number;
+    roomExpiresAt?: number;
+    roomClosed?: boolean;
+    clockOffset?: number;
     serverNow: number;
     tasks: Photo[];
     attempts?: {
@@ -16,6 +19,7 @@ export type RoomData = {
         startedAt: number;
         finishedAt: number | null;
         position: number;
+        resultExpiresAt?:number|null;
     }[];
 };
 export type ReportRow = Photo & {
@@ -23,12 +27,17 @@ export type ReportRow = Photo & {
     correctAnswer: string;
     correct: boolean;
     durationMs: number;
+    solutionPhoto?: string|null;
 };
 export type AttemptData = RoomData & {
     attemptId: string;
     position: number;
     startedAt: number;
-    taskStartedAt: number;
+    taskStartedAt: number|null;
+    readyId: string|null;
+    timingVersion: number;
+    completedMs: number;
+    resultExpiresAt:number|null;
     finishedAt: number | null;
     report?: ReportRow[];
     summary?: {
@@ -50,15 +59,17 @@ export class ApiError extends Error {
     constructor(message: string, public status: number) { super(message); }
 }
 export async function api<T>(path: string, key?: string, teacher = false, body?: unknown): Promise<T> {
+    const sentAt=Date.now();
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 20000);
     try {
         const response = await fetch('/api' + path, { method: body === undefined ? 'GET' : 'POST', cache: 'no-store', signal: controller.signal, headers: { ...(key ? { [teacher ? 'x-teacher-key' : 'x-attempt-key']: key } : {}), ...(body === undefined ? {} : { 'Content-Type': 'application/json' }) }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
-        const data = await response.json() as T & {
+        const data = await response.json() as T & {serverNow?:number;clockOffset?:number;
             error?: string;
         };
         if (!response.ok)
             throw new ApiError(data.error || 'Не удалось выполнить действие. Попробуйте ещё раз.', response.status);
+        if(data.serverNow)data.clockOffset=data.serverNow-(sentAt+Date.now())/2;
         return data;
     }
     catch (e) {
@@ -71,7 +82,7 @@ export async function api<T>(path: string, key?: string, teacher = false, body?:
     }
 }
 export const date = (ms: number) => new Date(ms).toLocaleString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit', timeZoneName: 'short' });
-export function duration(ms: number, precise = true) { const total = Math.max(0, ms); const h = Math.floor(total / 3600000), m = Math.floor(total / 60000) % 60, s = Math.floor(total / 1000) % 60; const fraction = precise ? ',' + Math.floor(total % 1000).toString().padStart(3, '0') : ''; return (h ? h.toString() + ':' : '') + m.toString().padStart(2, '0') + ':' + s.toString().padStart(2, '0') + fraction; }
+export {duration} from './time';
 export const newKey = () => crypto.randomUUID().replaceAll('-', '') + crypto.randomUUID().replaceAll('-', '');
 // Browser storage contains recovery tokens/drafts only; all results and clocks live in D1.
 export function readLocal<T>(key: string): T | null { try {
@@ -88,18 +99,22 @@ const pictures = new Map<string, {
     expires: number;
     promise: Promise<string>;
 }>();
-export function loadPhoto(path: string, expires: number) {
-    const existing = pictures.get(path);
+export function loadPhoto(path: string, expires: number,key?:string,teacher=false) {
+    const cacheKey=path+':'+(teacher?'teacher':'student')+':'+(key||'');
+    const existing = pictures.get(cacheKey);
     if (existing && existing.expires > Date.now()) return existing.promise;
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 45000);
-    const promise = fetch(path, { cache: 'no-store', signal: controller.signal }).then(async r => {
-        if (!r.ok) throw new ApiError(r.status === 410 ? 'Срок действия комнаты истёк' : 'Не удалось загрузить фотографию. Проверьте связь и повторите загрузку.', r.status);
-        return URL.createObjectURL(await r.blob());
+    const promise = fetch(path, { cache: 'no-store', signal: controller.signal,headers:key?{[teacher?'x-teacher-key':'x-attempt-key']:key}:{} }).then(async r => {
+        if (!r.ok) {const message=await r.json().catch(()=>({})) as {error?:string};throw new ApiError(message.error||'Не удалось загрузить фотографию. Повторите загрузку.',r.status);}
+        const url=URL.createObjectURL(await r.blob());
+        const image=new Image();image.src=url;
+        try{await image.decode();}catch{URL.revokeObjectURL(url);throw new ApiError('Фотография не открывается. Попросите преподавателя заменить её.',415);}
+        return url;
     }).catch(error => {
-        pictures.delete(path);
+        pictures.delete(cacheKey);
         throw error instanceof ApiError ? error : new ApiError('Связь прервалась при загрузке фотографии. Проверьте интернет и повторите загрузку.', 0);
     }).finally(() => clearTimeout(timeout));
-    pictures.set(path, { expires, promise });
+    pictures.set(cacheKey, { expires, promise });
     return promise;
 }

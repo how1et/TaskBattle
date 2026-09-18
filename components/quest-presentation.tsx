@@ -15,7 +15,7 @@ export function Photo({src,label,small=false}:{src:string;label:string;small?:bo
     const [zoom,setZoom]=useState(false);
     return <>
         <button className="image-button" type="button" onClick={()=>setZoom(true)} aria-label={'Увеличить: '+label}>
-            <img src={src} alt={label} style={small?{height:220}:undefined}/>
+            <img src={src} alt={label} loading={small?'lazy':'eager'} style={small?{height:220}:undefined}/>
             <span className="photo-caption"><Maximize2 size={14}/>Увеличить фотографию</span>
         </button>
         <Dialog open={zoom} onOpenChange={setZoom}><DialogContent className="zoom-content" showCloseButton={false}>
@@ -64,6 +64,7 @@ export function Report({data,photos}:{data:AttemptData;photos:Record<string,stri
             <div className="row spread"><h3>Задача № {t.ordinal}</h3><span className={'status '+(t.correct?'correct':'wrong')}>{t.correct?<CircleCheck size={15}/>:<CircleMinus size={15}/>} {t.correct?'Верно':'Неверно'}</span></div>
             {photos[t.id]?<Photo src={photos[t.id]} label={'Задача № '+t.ordinal} small/>:<p className="muted">Загружаем фотографию…</p>}
             <dl className="answer-grid"><div><dt>Ответ ученика</dt><dd>{t.answer}</dd></div><div><dt>Правильный ответ</dt><dd>{t.correctAnswer}</dd></div><div><dt>Время решения</dt><dd>{duration(t.durationMs)}</dd></div></dl>
+            {t.solutionPhoto&&<div className="report-solution"><h4>Фото решения</h4>{photos['solution:'+t.id]?<Photo src={photos['solution:'+t.id]} label={'Решение задачи № '+t.ordinal} small/>:<p className="muted">Загружаем фото…</p>}</div>}
         </article>)}
     </div>;
 }
