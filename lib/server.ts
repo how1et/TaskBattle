@@ -31,9 +31,9 @@ type Task = {
     answer: string;
 };
 class HttpError extends Error {
-    constructor(public status: number, message: string) { super(message); }
+    constructor(public status: number, message: string, public code = 'request') { super(message); }
 }
-const fail = (s: number, m: string): never => { throw new HttpError(s, m); };
+const fail = (s: number, m: string, code = 'request'): never => { throw new HttpError(s, m, code); };
 const db = () => { if (!env.DB)
     fail(503, 'TaskBattle временно недоступен. Попробуйте позже.'); return env.DB!; };
 const bucket = () => { if (!env.BUCKET)
@@ -213,7 +213,7 @@ async function start(req:Request,r:Room,ip:string) {
 }
 async function ready(req:Request,a:Attempt,r:Room) {
     const data=await body(req),ids:string[]=JSON.parse(a.order_json),now=Date.now();
-    if(a.finished_at!==null||data.position!==a.position||data.taskId!==ids[a.position])fail(409,'Задача уже изменена. Нажмите «Продолжить».');
+    if(a.finished_at!==null||data.position!==a.position||data.taskId!==ids[a.position])fail(409,'Задача уже изменена. Проверьте отправку.');
     if(a.timing_version===1)return snapshot(a,r);
     if(!validId(data.readyId)||!Number.isSafeInteger(data.startedAt)||data.startedAt<r.created_at||data.startedAt>now+60000)fail(400,'Не удалось начать задачу. Обновите страницу.');
     await sql('UPDATE attempts SET ready_id=?,task_started_at=?,started_at=CASE WHEN position=0 THEN ? ELSE started_at END WHERE id=? AND position=? AND ready_id IS NULL AND finished_at IS NULL AND EXISTS(SELECT 1 FROM rooms WHERE id=attempts.room_id AND expires_at>?)',data.readyId,data.startedAt,data.startedAt,a.id,a.position,now).run();
@@ -231,7 +231,25 @@ async function answerBody(req:Request):Promise<{data:any;file:File|null}> {
     const file=form.get('solution');if(form.getAll('solution').length>1||file!==null&&!(file instanceof File))fail(400,'Можно прикрепить одно фото решения.');
     return {data,file:file as File|null};
 }
-async function submit(req:Request,a:Attempt,r:Room) {
+async function cancelAnswer(req:Request,a:Attempt,r:Room){
+    const data=await body(req),ids:string[]=JSON.parse(a.order_json);
+    if(!validId(data.requestId)||!Number.isInteger(data.position)||ids[data.position]!==data.taskId)fail(400,'Не удалось проверить отправку. Повторите действие.');
+    // This statement and submit's conditional INSERT serialize in D1. A late
+    // upload cannot commit once its request was cancelled for editing.
+    await sql('INSERT INTO cancelled_answers(attempt_id,request_id) SELECT id,? FROM attempts WHERE id=? AND position=? AND finished_at IS NULL AND NOT EXISTS(SELECT 1 FROM answers WHERE attempt_id=? AND request_id=?) ON CONFLICT DO NOTHING',data.requestId,a.id,data.position,a.id,data.requestId).run();
+    const fresh=(await sql('SELECT * FROM attempts WHERE id=?',a.id).first<Attempt>())!;
+    const cancelled=!!await sql('SELECT request_id FROM cancelled_answers WHERE attempt_id=? AND request_id=?',a.id,data.requestId).first();
+    return {cancelled:cancelled&&fresh.position===data.position,snapshot:await snapshot(fresh,r)};
+}
+async function discardUnusedPhoto(key:string|null){
+    if(!key)return;
+    try{
+        const claimed=await sql("UPDATE blobs SET state='deleting' WHERE key=? AND state='live' AND NOT EXISTS(SELECT 1 FROM answers WHERE solution_key=?) RETURNING key",key,key).first();
+        if(claimed){await bucket().delete(key);await sql("DELETE FROM blobs WHERE key=? AND state='deleting'",key).run();}
+    }catch{/* Registered orphan remains eligible for scheduled cleanup. */}
+}
+async function submit(req:Request,a:Attempt,r:Room,trace:RequestTrace) {
+    trace.phase='validate-answer';
     const {data,file}=await answerBody(req);
     if(!validId(data.requestId)||typeof data.answer!=='string'||!data.answer.trim()||data.answer.length>200||!Number.isInteger(data.position))fail(400,'Введите ответ от 1 до 200 символов.');
     let digest:string|null=null,mime:string|null=null,bytes:Uint8Array|null=null;
@@ -244,9 +262,10 @@ async function submit(req:Request,a:Attempt,r:Room) {
     if(a.timing_version===2&&(!Number.isSafeInteger(data.durationMs)||data.durationMs<0||data.durationMs>48*3600000||!validId(data.readyId)))fail(400,'Не удалось отправить время. Обновите страницу.');
     const matches=(row:Answer)=>row.answer===data.answer.trim()&&row.position===data.position&&row.task_id===data.taskId&&row.solution_digest===digest&&(a.timing_version===1||row.duration_ms===data.durationMs&&row.ready_id===data.readyId);
     const prior=await sql('SELECT * FROM answers WHERE attempt_id=? AND request_id=?',a.id,data.requestId).first<Answer>();
-    if(prior){if(!matches(prior))fail(409,'Уже принят другой ответ. Нажмите «Продолжить».');return snapshot((await sql('SELECT * FROM attempts WHERE id=?',a.id).first<Attempt>())!,r);}
+    if(prior){if(!matches(prior))fail(409,'Уже принят другой ответ. Проверьте отправку.');return snapshot((await sql('SELECT * FROM attempts WHERE id=?',a.id).first<Attempt>())!,r);}
+    if(await sql('SELECT request_id FROM cancelled_answers WHERE attempt_id=? AND request_id=?',a.id,data.requestId).first())fail(409,'Этот вариант отменён. Отправьте изменённый ответ.','cancelled');
     const ids:string[]=JSON.parse(a.order_json);
-    if(a.finished_at!==null||data.position!==a.position||data.taskId!==ids[a.position]||a.timing_version===2&&(!a.ready_id||a.ready_id!==data.readyId))fail(409,'Задача уже изменена. Нажмите «Продолжить».');
+    if(a.finished_at!==null||data.position!==a.position||data.taskId!==ids[a.position]||a.timing_version===2&&(!a.ready_id||a.ready_id!==data.readyId))fail(409,'Задача уже изменена. Проверьте отправку.');
     const duration=a.timing_version===2?data.durationMs:Math.max(0,Date.now()-a.task_started_at);
     if(duration>Math.max(0,Date.now()-a.task_started_at)+60000)fail(400,'Не удалось отправить время. Обновите страницу.');
     const t=await sql('SELECT * FROM tasks WHERE id=? AND room_id=?',data.taskId,r.id).first<Task>();
@@ -257,19 +276,23 @@ async function submit(req:Request,a:Attempt,r:Room) {
         await sql("INSERT INTO blobs(key,expires_at,state) VALUES (?,?,'live') ON CONFLICT(key) DO NOTHING",solutionKey,Date.now()+3600000).run();
         const lease=await sql("SELECT key FROM blobs WHERE key=? AND state='live'",solutionKey).first();
         if(!lease)fail(409,'Не удалось загрузить фото. Повторите отправку.');
-        await bucket().put(solutionKey,bytes,{httpMetadata:{contentType:mime}});
+        trace.phase='store-solution-photo';
+        try{await bucket().put(solutionKey,bytes,{httpMetadata:{contentType:mime}});}
+        catch(e){console.warn(JSON.stringify({event:'solution-upload-failed',phase:trace.phase,errorName:e instanceof Error?e.name:'UnknownError'}));await discardUnusedPhoto(solutionKey);fail(503,'Не удалось загрузить фото. Повторите отправку.','photo-upload');}
     }
     const now=Date.now(),end=a.task_started_at+duration;
-    await db().batch([
+    trace.phase='commit-answer';
+    try{await db().batch([
         sql(`INSERT INTO answers(id,attempt_id,position,task_id,request_id,answer,correct,started_at,answered_at,duration_ms,ready_id,received_at,solution_key,solution_mime,solution_digest)
-        SELECT ?,id,position,?,?,?,?,task_started_at,?,?,?,?,?,?,? FROM attempts WHERE id=? AND position=? AND finished_at IS NULL AND (timing_version=1 OR ready_id=?) AND EXISTS(SELECT 1 FROM rooms WHERE id=attempts.room_id AND expires_at>?) AND (? IS NULL OR EXISTS(SELECT 1 FROM blobs WHERE key=? AND state='live')) ON CONFLICT DO NOTHING`,random(),data.taskId,data.requestId,data.answer.trim(),normalizeAnswer(t!.answer)===normalizeAnswer(data.answer)?1:0,end,duration,a.ready_id,now,solutionKey,mime,digest,a.id,data.position,a.ready_id,now,solutionKey,solutionKey),
+        SELECT ?,id,position,?,?,?,?,task_started_at,?,?,?,?,?,?,? FROM attempts WHERE id=? AND position=? AND finished_at IS NULL AND (timing_version=1 OR ready_id=?) AND EXISTS(SELECT 1 FROM rooms WHERE id=attempts.room_id AND expires_at>?) AND (? IS NULL OR EXISTS(SELECT 1 FROM blobs WHERE key=? AND state='live')) AND NOT EXISTS(SELECT 1 FROM cancelled_answers WHERE attempt_id=attempts.id AND request_id=?) ON CONFLICT DO NOTHING`,random(),data.taskId,data.requestId,data.answer.trim(),normalizeAnswer(t!.answer)===normalizeAnswer(data.answer)?1:0,end,duration,a.ready_id,now,solutionKey,mime,digest,a.id,data.position,a.ready_id,now,solutionKey,solutionKey,data.requestId),
         sql(`UPDATE attempts SET position=position+1,ready_id=NULL,task_started_at=CASE WHEN timing_version=1 THEN ? ELSE 0 END,finished_at=CASE WHEN position+1=? THEN ? ELSE NULL END,result_expires_at=CASE WHEN position+1=? THEN ? ELSE NULL END WHERE id=? AND position=? AND EXISTS(SELECT 1 FROM answers WHERE attempt_id=? AND request_id=? AND position=?)`,now,r.count,now,r.count,now+RESULT_TTL,a.id,data.position,a.id,data.requestId,data.position),
         sql(`UPDATE blobs SET expires_at=MAX(expires_at,?) WHERE key=? AND state='live' AND EXISTS(SELECT 1 FROM answers WHERE attempt_id=? AND request_id=? AND solution_key=?)`,r.expires_at,solutionKey,a.id,data.requestId,solutionKey),
         sql(`UPDATE blobs SET expires_at=MAX(expires_at,?) WHERE key IN(SELECT file_key FROM tasks WHERE room_id=?) AND EXISTS(SELECT 1 FROM attempts WHERE id=? AND finished_at IS NOT NULL)`,now+RESULT_TTL,r.id,a.id),
         sql(`UPDATE blobs SET expires_at=MAX(expires_at,?) WHERE key IN(SELECT solution_key FROM answers WHERE attempt_id=?) AND EXISTS(SELECT 1 FROM attempts WHERE id=? AND finished_at IS NOT NULL)`,now+RESULT_TTL,a.id,a.id)
-    ]);
+    ]);}catch(e){await discardUnusedPhoto(solutionKey);throw e;}
     const saved=await sql('SELECT * FROM answers WHERE attempt_id=? AND request_id=?',a.id,data.requestId).first<Answer>();
-    if(!saved||!matches(saved)){await assertAccessTime(a,r);fail(409,'Уже принят другой ответ. Нажмите «Продолжить».');}
+    if(saved?.solution_key!==solutionKey)await discardUnusedPhoto(solutionKey);
+    if(!saved||!matches(saved)){await assertAccessTime(a,r);fail(409,'Ответ изменён или уже принят. Проверьте отправку.','conflict');}
     return snapshot((await sql('SELECT * FROM attempts WHERE id=?',a.id).first<Attempt>())!,r);
 }
 export async function cleanup() {
@@ -364,8 +387,10 @@ export async function handle(req: Request) {
                 result = await snapshot(a, r);
             else if(p[2]==='ready'&&method==='POST'&&!teacher)
                 result=await ready(req,a,r);
+            else if(p[2]==='cancel-answer'&&method==='POST'&&!teacher)
+                result=await cancelAnswer(req,a,r);
             else if (p[2] === 'answers' && method === 'POST'&&!teacher)
-                result = await submit(req, a, r);
+                result = await submit(req, a, r,trace);
             else
                 fail(404, 'Страница не найдена.');
         }
@@ -375,8 +400,8 @@ export async function handle(req: Request) {
     }
     catch (e) {
         if (e instanceof HttpError)
-            return Response.json({ error: e.message }, { status: e.status, headers });
+            return Response.json({ error: e.message, code:e.code }, { status: e.status, headers });
         console.error(JSON.stringify({ event: 'taskbattle-request-failed', traceId: trace.id, phase: trace.phase, elapsedMs: Date.now() - trace.started, errorName: e instanceof Error ? e.name : 'unknown' }));
-        return Response.json({ error: 'Не удалось выполнить действие. Попробуйте ещё раз, не закрывая страницу.', traceId: trace.id }, { status: 503, headers });
+        return Response.json({ error: trace.phase==='commit-answer'?'Не удалось сохранить ответ. Повторите отправку.':'Не удалось выполнить действие. Попробуйте ещё раз.',code:trace.phase==='commit-answer'?'answer-save':'request', traceId: trace.id }, { status: 503, headers });
     }
 }

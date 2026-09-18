@@ -1,10 +1,13 @@
 import assert from 'node:assert/strict';
 import {createServer} from 'node:http';
 import {readFile,writeFile} from 'node:fs/promises';
+import {crc32} from 'node:zlib';
 const base=process.env.TEST_URL||'http://127.0.0.1:5173';
 assert.match(base,/^http:\/\/127\.0\.0\.1:/,'Integration tests only create local data');
 const key=()=>crypto.randomUUID().replaceAll('-','')+crypto.randomUUID().replaceAll('-','');
 const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jf9sAAAAASUVORK5CYII=','base64');
+const textChunk=Buffer.alloc(2*1024*1024+12,65);textChunk.writeUInt32BE(textChunk.length-12,0);textChunk.write('tEXt',4);textChunk.write('qa\0',8);textChunk.writeUInt32BE(crc32(textChunk.subarray(4,-4)),textChunk.length-4);
+const largePng=Buffer.concat([png.subarray(0,-12),textChunk,png.subarray(-12)]);
 async function call(path,{method='GET',secret,teacher=false,body,file}={}){let payload;if(file){payload=new FormData();payload.set('payload',JSON.stringify(body));payload.set('solution',file,file.name);}else payload=body?JSON.stringify(body):undefined;const r=await fetch(base+'/api'+path,{method,headers:{...(secret?{[teacher?'x-teacher-key':'x-attempt-key']:secret}:{}),...(body&&!file?{'content-type':'application/json'}:{})},body:payload});return {status:r.status,data:await r.json()};}
 const teacherKey=key(),requestId=crypto.randomUUID();
 const count=25;
@@ -21,7 +24,9 @@ for(let position=0;position<count;position++){
  const ready=(await call(`/attempts/${attemptId}/ready`,{method:'POST',secret:attemptKey,body:{position,taskId:a.tasks[position].id,readyId:crypto.randomUUID(),startedAt:Date.now()}}));assert.equal(ready.status,200,JSON.stringify(ready.data));a=ready.data;
  const durationMs=1234+position,answer=position===1?'999':['5,00','2,50','-5.0'][(a.tasks[position].ordinal-1)%3];total+=durationMs;
  const payload={requestId:crypto.randomUUID(),position,taskId:a.tasks[position].id,answer,readyId:a.readyId,durationMs};
- const file=position===0?new File([png],'solution.png',{type:'image/png'}):undefined;
+ // A valid ancillary PNG chunk exercises the real framework multipart preflight
+ // above its former 1 MiB ceiling, not just the directly imported API handler.
+ const file=position===0?new File([largePng],'solution.png',{type:'image/png'}):undefined;
  if(position===0){const both=await Promise.all([1,2].map(()=>call(`/attempts/${attemptId}/answers`,{method:'POST',secret:attemptKey,body:payload,file})));assert.ok(both.every(x=>x.status===200),JSON.stringify(both));a=both[0].data;assert.equal((await call(`/attempts/${attemptId}/answers`,{method:'POST',secret:attemptKey,body:{...payload,answer:'other'},file})).status,409);}
  else if(position===1){const proxy=createServer(async(req,res)=>{for await(const ignored of req){}await call(`/attempts/${attemptId}/answers`,{method:'POST',secret:attemptKey,body:payload});res.destroy();});await new Promise(resolve=>proxy.listen(0,'127.0.0.1',resolve));await assert.rejects(fetch(`http://127.0.0.1:${proxy.address().port}`,{method:'POST',body:'test'}));await new Promise(resolve=>proxy.close(resolve));a=(await call(`/attempts/${attemptId}/answers`,{method:'POST',secret:attemptKey,body:payload})).data;}
  else{const out=await call(`/attempts/${attemptId}/answers`,{method:'POST',secret:attemptKey,body:payload});assert.equal(out.status,200,JSON.stringify(out));a=out.data;}

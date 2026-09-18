@@ -27,6 +27,7 @@ export default function Battle({ view }: {
     const [offset, setOffset] = useState(0);
     const lock = useRef(false);
     const input = useRef<HTMLInputElement>(null);
+    const gallery = useRef<HTMLInputElement>(null);
     const latest = useRef(data);
     latest.current = data;
     const a = (kind === 'attempt' || reportId) ? data as AttemptData | null : null;
@@ -95,7 +96,7 @@ export default function Battle({ view }: {
     catch { } return () => lifecycle.abort(); }, [kind, id]);
     if (expired) return <Frame><div className="panel state-card stack"><Hourglass size={38}/><h1>{error.includes('Срок хранения')||a?.finishedAt!=null||data?.roomClosed?'Срок хранения результата истёк':'Срок действия комнаты истёк'}</h1><p className="muted">Попросите преподавателя создать новое занятие.</p><a className="link-text" href="/">На главную</a></div></Frame>;
     if (!data) return <Frame><div className="panel state-card stack">{error?<><ScrollText size={34}/><h1>Не удалось открыть занятие</h1><p role="alert" className="error">{error}</p><Button className="secondary" variant="outline" onClick={refresh}>Повторить</Button></>:<><p role="status">Загружаем занятие…</p><Skeleton className="h-10 w-3/4"/><Skeleton className="h-60 w-full"/></>}</div></Frame>;
-    const common=<>{error&&<div className="error" role="alert">{error}{kind==='attempt'&&<Button variant="outline" className="secondary" onClick={refresh}>Продолжить</Button>}</div>}{photoError&&<div className="error" role="alert">{photoError}<Button variant="outline" className="secondary" onClick={()=>{setData(null);void refresh();}}>Повторить загрузку фото</Button></div>}</>;
+    const common=<>{error&&<div className="error" role="alert">{error}{kind==='attempt'&&<Button variant="outline" className="secondary" onClick={refresh}>Проверить состояние</Button>}</div>}{photoError&&<div className="error" role="alert">{photoError}<Button variant="outline" className="secondary" onClick={()=>{setData(null);void refresh();}}>Повторить загрузку фото</Button></div>}</>;
     if (kind==='room') return <Frame><section className="start-scene" aria-label="Начать испытание">
         <div className="start-title"><p className="eyebrow">ТВОЁ ИСПЫТАНИЕ</p><h1>{data.title}</h1></div>
         <div className="guide-portrait"><img className="character-art" src="/images/adventure-guide.webp" width="640" height="640" alt="Искатель приключений приглашает начать испытание" fetchPriority="high"/></div>
@@ -120,15 +121,20 @@ export default function Battle({ view }: {
         <div className="progress-area"><Progress className="progress-line" value={a.position/a.count*100} aria-label="Прогресс попытки"/><div className="rune-track" aria-hidden="true">{a.tasks.map((t,i)=><span key={t.id} className={'rune '+(i<a.position?'complete':i===a.position?'current':'')}>{i<a.position?<Check size={13}/>:i===a.position?<Gem size={15}/>:i+1}</span>)}</div></div>
         {photos[task.id]?<Photo src={photos[task.id]} label={'Задача '+(a.position+1)}/>:<Skeleton className="h-64 w-full"/>}
         <div className="solution-attachment">
-            {solver.preview&&<div className="solution-preview"><img src={solver.preview} alt="Фото вашего решения"/><span>Фото решения</span><Button type="button" variant="ghost" className="icon-button" aria-label="Удалить фото решения" disabled={busy||pending||solver.photoBusy} onClick={()=>void solver.selectPhoto(null)}><Trash2 size={18}/></Button></div>}
+            {solver.preview&&<div className="solution-preview"><img src={solver.preview} alt="Фото вашего решения"/><span>Фото решения</span><Button type="button" variant="ghost" className="icon-button" aria-label="Удалить фото решения" disabled={busy} onClick={()=>void solver.selectPhoto(null)}><Trash2 size={18}/></Button></div>}
             <div className="solution-actions">
-                <label className={'photo-choice '+(busy||pending?'disabled':'')}><ImagePlus size={18}/>{solver.preview?'Заменить фото':'Добавить фото решения'}<input type="file" accept="image/*" aria-label={solver.preview?'Заменить фото решения':'Добавить фото решения'} disabled={busy||pending||solver.photoBusy||solver.preparing} onChange={e=>{const f=e.target.files?.[0];if(f)void solver.selectPhoto(f);e.target.value='';}}/></label>
-                <label className={'photo-choice '+(busy||pending?'disabled':'')}><Camera size={18}/>Камера<input type="file" accept="image/*" capture="environment" aria-label="Снять фото решения камерой" disabled={busy||pending||solver.photoBusy||solver.preparing} onChange={e=>{const f=e.target.files?.[0];if(f)void solver.selectPhoto(f);e.target.value='';}}/></label>
-            </div><span className="small muted">Необязательно · JPEG, PNG, WebP · до 3 МБ и 40 Мп</span>{solver.photoBusy&&<p role="status">Готовим фото…</p>}
+                <label className={'photo-choice '+(busy?'disabled':'')}><ImagePlus size={18}/>{solver.preview?'Заменить фото':'Добавить фото решения'}<input ref={gallery} type="file" accept="image/*" aria-label={solver.preview?'Заменить фото решения':'Добавить фото решения'} disabled={busy||solver.preparing} onClick={()=>{if(pending)void solver.edit();}} onChange={e=>{const f=e.target.files?.[0];if(f)void solver.selectPhoto(f);e.target.value='';}}/></label>
+                <label className={'photo-choice '+(busy?'disabled':'')}><Camera size={18}/>Камера<input type="file" accept="image/*" capture="environment" aria-label="Снять фото решения камерой" disabled={busy||solver.preparing} onClick={()=>{if(pending)void solver.edit();}} onChange={e=>{const f=e.target.files?.[0];if(f)void solver.selectPhoto(f);e.target.value='';}}/></label>
+            </div><span className="small muted">Необязательно · JPEG, PNG, WebP · до 30 МБ · большие фото уменьшим</span>{solver.photoBusy&&<p role="status">Готовим фото…</p>}
         </div>
+        {solver.warning&&<p role="status" className="notice small">{solver.warning}</p>}
+        {solver.error&&<div className="error" role="alert"><p>{solver.error}</p><div className="row recovery-actions">
+            {pending&&<Button type="button" variant="outline" className="secondary" disabled={busy} onClick={()=>void solver.edit()}>Изменить ответ</Button>}
+            {(solver.preview||solver.missingPhoto)&&<><Button type="button" variant="outline" className="secondary" disabled={busy} onClick={()=>gallery.current?.click()}>Заменить фото</Button><Button type="button" variant="outline" className="secondary" disabled={busy||solver.photoBusy||!answer.trim()} onClick={()=>void solver.withoutPhoto()}>Отправить без фото</Button></>}
+        </div></div>}
         <form className="answer-form" onSubmit={e=>{e.preventDefault();void solver.submit();}}>
             <Input ref={input} className="text-input" aria-label="Ваш ответ" placeholder="Ваш ответ" autoComplete="off" autoCapitalize="off" autoCorrect="off" spellCheck={false} inputMode="text" enterKeyHint="send" maxLength={200} value={answer} disabled={busy||pending||solver.preparing||!photos[task.id]} onChange={e=>solver.changeAnswer(e.target.value)}/>
-            <Button type="submit" className="primary" disabled={busy||solver.photoBusy||solver.preparing||!answer.trim()||!photos[task.id]}>{busy?(solver.preview?'Загружаем фото…':'Сохраняем ответ…'):pending?'Повторить':'Ответить'}<ArrowRight size={19}/></Button>
+            <Button type="submit" className="primary" disabled={busy||solver.photoBusy||solver.preparing||!answer.trim()||!photos[task.id]}>{busy?(solver.recovering?'Проверяем ответ…':solver.preview?'Загружаем фото…':'Сохраняем ответ…'):pending?'Повторить отправку':'Ответить'}<ArrowRight size={19}/></Button>
         </form>{common}
     </div></Frame>;
 }

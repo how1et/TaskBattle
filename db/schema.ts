@@ -6,3 +6,5 @@ export const answers = sqliteTable('answers', { id: text('id').primaryKey(), att
 export const blobs = sqliteTable('blobs', { key: text('key').primaryKey(), expiresAt: integer('expires_at').notNull(), state: text('state').notNull().default('live') }, t => [index('blobs_expiry').on(t.expiresAt)]);
 export const expiredAttempts = sqliteTable('expired_attempts', { id: text('id').primaryKey(), secretHash: text('secret_hash').notNull(), teacherHash: text('teacher_hash').notNull(), reason: text('reason').notNull() });
 export const rateLimits = sqliteTable('rate_limits', { key: text('key').primaryKey(), hits: integer('hits').notNull(), expiresAt: integer('expires_at').notNull() }, t => [index('limits_expiry').on(t.expiresAt)]);
+
+export const cancelledAnswers = sqliteTable('cancelled_answers', { attemptId: text('attempt_id').notNull().references(() => attempts.id, { onDelete: 'cascade' }), requestId: text('request_id').notNull() }, t => [uniqueIndex('cancelled_answer_request').on(t.attemptId,t.requestId)]);
