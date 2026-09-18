@@ -31,9 +31,9 @@ class HttpError extends Error {
 }
 const fail = (s: number, m: string): never => { throw new HttpError(s, m); };
 const db = () => { if (!env.DB)
-    fail(503, 'База временно недоступна. Попробуйте позже.'); return env.DB!; };
+    fail(503, 'TaskBattle временно недоступен. Попробуйте позже.'); return env.DB!; };
 const bucket = () => { if (!env.BUCKET)
-    fail(503, 'Хранилище временно недоступно. Попробуйте позже.'); return env.BUCKET!; };
+    fail(503, 'Фотографии временно недоступны. Попробуйте позже.'); return env.BUCKET!; };
 const sql = (query: string, ...args: (string | number | null)[]) => db().prepare(query).bind(...args);
 const random = (n = 24) => Array.from(crypto.getRandomValues(new Uint8Array(n)), b => b.toString(16).padStart(2, '0')).join('');
 const hash = async (s: string) => Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s))), b => b.toString(16).padStart(2, '0')).join('');
@@ -56,7 +56,7 @@ async function limit(key: string, max: number, window: number) { const now = Dat
     fail(429, 'Слишком много запросов. Подождите немного и повторите.'); }
 async function body(req: Request) { if (Number(req.headers.get('content-length')) > 8192)
     fail(413, 'Слишком большой запрос.'); const reader = req.body?.getReader(); if (!reader)
-    fail(400, 'Пустой запрос.'); let size = 0; let value = ''; const decoder = new TextDecoder(); while (true) {
+    fail(400, 'Данные не получены. Повторите действие.'); let size = 0; let value = ''; const decoder = new TextDecoder(); while (true) {
     const chunk = await reader!.read();
     if (chunk.done)
         break;
@@ -70,7 +70,7 @@ async function body(req: Request) { if (Number(req.headers.get('content-length')
     return JSON.parse(value + decoder.decode());
 }
 catch {
-    fail(400, 'Некорректный запрос.');
+    fail(400, 'Не удалось прочитать отправленные данные. Повторите действие.');
 } }
 function imageType(a: Uint8Array) { if (a.length < 12)
     return null; if (a[0] === 255 && a[1] === 216 && a[2] === 255)
@@ -99,7 +99,7 @@ async function createRoom(req: Request, ip: string, trace: RequestTrace) {
     const existing = await sql('SELECT * FROM rooms WHERE request_id=?', requestId).first<Room>();
     if (existing) {
         if (existing.teacher_hash !== teacherHash)
-            fail(409, 'Идентификатор создания уже используется.');
+            fail(409, 'Не удалось создать комнату. Откройте главную страницу и добавьте задачи заново.');
         await room(existing.id);
         return { roomId: existing.id, teacherKey, expiresAt: existing.expires_at };
     }
@@ -124,7 +124,7 @@ async function createRoom(req: Request, ip: string, trace: RequestTrace) {
     let total = 0;
     for (const file of files) {
         if (!(file instanceof File) || file.size === 0 || file.size > 3 * 1024 * 1024)
-            fail(400, 'Каждая фотография должна быть от 1 байта до 3 МБ.');
+            fail(400, 'Выберите непустые фотографии размером до 3 МБ каждая.');
         total += (file as File).size;
     }
     if (total > 18 * 1024 * 1024)
@@ -193,7 +193,7 @@ async function snapshot(a: Attempt, r: Room) {
 async function start(req: Request, r: Room, ip: string) {
     const data = await body(req);
     if (!validId(data.attemptId) || !validKey(data.attemptKey))
-        fail(400, 'Некорректный идентификатор попытки.');
+        fail(400, 'Не удалось начать попытку. Откройте ссылку на занятие и нажмите «Старт».');
     const old = await sql('SELECT * FROM attempts WHERE id=?', data.attemptId).first<Attempt>();
     const secretHash = await hash(data.attemptKey);
     if (old) {
@@ -233,18 +233,18 @@ async function submit(req: Request, a: Attempt, r: Room) {
     }>();
     if (prior) {
         if (prior.answer !== data.answer.trim() || prior.position !== data.position || prior.task_id !== data.taskId)
-            fail(409, 'Этот запрос уже использован для другого ответа.');
+            fail(409, 'Ранее был отправлен другой ответ. Продолжите с сохранённого места.');
         const fresh = await sql('SELECT * FROM attempts WHERE id=?', a.id).first<Attempt>();
         return snapshot(fresh!, r);
     }
     const ids: string[] = JSON.parse(a.order_json);
     if (a.finished_at !== null || data.position !== a.position || data.taskId !== ids[a.position])
-        fail(409, 'Эта задача уже отправлена. Обновите состояние попытки.');
+        fail(409, 'Ответ уже отправлен. Продолжите с сохранённого места.');
     const task = await sql('SELECT answer FROM tasks WHERE id=? AND room_id=?', data.taskId, r.id).first<{
         answer: string;
     }>();
     if (!task)
-        fail(400, 'Задача не принадлежит этой попытке.');
+        fail(400, 'Не удалось открыть текущую задачу. Обновите страницу, чтобы продолжить.');
     const correct = normalizeAnswer(task!.answer) === normalizeAnswer(data.answer);
     const now = Date.now();
     await db().batch([
@@ -257,7 +257,7 @@ async function submit(req: Request, a: Attempt, r: Room) {
         task_id: string;
     }>();
     if (!saved || saved.request_id !== data.requestId || saved.answer !== data.answer.trim() || saved.task_id !== data.taskId)
-        fail(409, 'Задача уже отправлена с другим ответом. Обновите состояние попытки.');
+        fail(409, 'Ранее был отправлен другой ответ. Продолжите с сохранённого места.');
     const updated = await sql('SELECT * FROM attempts WHERE id=?', a.id).first<Attempt>();
     await room(r.id);
     return snapshot(updated!, r);
@@ -275,9 +275,9 @@ export async function handle(req: Request) {
         const p = url.pathname.split('/').filter(Boolean).slice(1);
         const method = req.method;
         if (method !== 'GET' && req.headers.get('origin') && req.headers.get('origin') !== url.origin)
-            fail(403, 'Запрос с другого сайта запрещён.');
+            fail(403, 'Откройте ссылку TaskBattle в браузере и повторите действие.');
         if (req.headers.get('sec-fetch-site') === 'cross-site')
-            fail(403, 'Запрос с другого сайта запрещён.');
+            fail(403, 'Откройте ссылку TaskBattle в браузере и повторите действие.');
         if (p[0] === 'health')
             return Response.json({ ok: true }, { headers });
         const ip = await hash((req.headers.get('cf-connecting-ip') || 'local') + ':' + new Date().toISOString().slice(0, 10));
@@ -343,6 +343,6 @@ export async function handle(req: Request) {
         if (e instanceof HttpError)
             return Response.json({ error: e.message }, { status: e.status, headers });
         console.error(JSON.stringify({ event: 'taskbattle-request-failed', traceId: trace.id, phase: trace.phase, elapsedMs: Date.now() - trace.started, errorName: e instanceof Error ? e.name : 'unknown' }));
-        return Response.json({ error: 'Не удалось связаться с сервером. Введённые данные сохранены — повторите запрос.', traceId: trace.id }, { status: 503, headers });
+        return Response.json({ error: 'Не удалось выполнить действие. Попробуйте ещё раз, не закрывая страницу.', traceId: trace.id }, { status: 503, headers });
     }
 }

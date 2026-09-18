@@ -1,8 +1,9 @@
 "use client";
+import { SiteHeader } from "@/components/site-header";
 import { useEffect, useRef, useState } from "react";
 import { uploadRoom, recoverRoom, UploadError } from "@/lib/room-upload";
 import { readLocal, writeLocal } from "@/lib/client";
-import { Upload, Trash2, ArrowRight, Timer, ShieldCheck, Zap } from "lucide-react";
+import { Trash2, ArrowRight, Hourglass, ShieldCheck, ScrollText, Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 type Draft = {
@@ -82,6 +83,47 @@ export default function Home() {
         setProgress("");
         lock.current = false;
     } }
-    return <><header className="topbar"><a className="brand" href="/"><span className="brand-icon"><Zap size={22} fill="currentColor"/></span>TaskBattle</a><span className="header-note">Задачи. Время. Результат.</span><span className="pill">Без регистрации</span></header><main className="workspace"><div className="page-heading"><div><p className="eyebrow">ДЛЯ ПРЕПОДАВАТЕЛЯ</p><h1>Новое занятие</h1><p className="muted">Ваши задачи — в одну ссылку для ученика.</p></div><div className="duration-tag"><Timer size={20}/><span>Комната на <b>48 часов</b></span></div></div><div className="creator-grid"><section className="panel editor"><div className="section-title"><span className="step">01</span><h2>Название занятия</h2><span className="muted small">необязательно</span></div><Input className="text-input" aria-label="Название занятия" placeholder="Например, квадратные уравнения" maxLength={100} value={title} onChange={e => { resetCreation(); setTitle(e.target.value); }} disabled={busy}/><div className="section-title task-title"><span className="step">02</span><h2>Фотографии задач</h2><span className="counter">{tasks.length} / 12</span></div><label className={`upload-area ${busy ? "disabled" : ""}`} onDragOver={e => e.preventDefault()} onDrop={e => { e.preventDefault(); if (!busy)
-        add(e.dataTransfer.files); }}><input aria-label="Загрузить фотографии задач" type="file" accept="image/jpeg,image/png,image/webp" multiple disabled={busy} onChange={e => { add(e.target.files); e.target.value = ""; }}/><span className="upload-icon"><Upload size={25}/></span><strong>Добавить фотографии</strong><span>Выберите файлы или перетащите сюда</span><small>JPEG, PNG, WebP · до 3 МБ каждый · до 18 МБ всего</small></label>{tasks.length > 0 && <div className="draft-list">{tasks.map((task, i) => <div className="draft-task" key={task.id}><img src={task.url} alt={`Задача ${i + 1}`}/><div className="draft-fields"><label htmlFor={task.id}>Задача {i + 1} · правильный ответ</label><Input id={task.id} className="text-input" placeholder="Введите короткий ответ" maxLength={200} value={task.answer} disabled={busy} onChange={e => { resetCreation(); setTasks(ts => ts.map(t => t.id === task.id ? { ...t, answer: e.target.value } : t)); }}/></div><Button type="button" variant="ghost" className="icon-button" aria-label={`Удалить задачу ${i + 1}`} disabled={busy} onClick={() => { resetCreation(); URL.revokeObjectURL(task.url); setTasks(ts => ts.filter(t => t.id !== task.id)); }}><Trash2 size={19}/></Button></div>)}</div>}{progress && <p role="status" className="muted small">{progress}</p>}{error && <p role="alert" className="error">{error}</p>}{recovering && <Button className="primary" disabled={busy} onClick={checkPending}>Проверить создание</Button>}<div className="create-footer"><span className="muted small">Одна фотография — одна задача.<br />Укажите ответ для каждой.</span><Button className="primary" disabled={busy || !tasks.length || tasks.some(t => !t.answer.trim())} onClick={create}>{busy ? "Создаём комнату…" : error && creation.current ? "Повторить создание" : "Создать комнату"}<ArrowRight size={19}/></Button></div></section><aside className="sidebar"><div className="guide-card"><span className="eyebrow">КАК ПРОХОДИТ ЗАНЯТИЕ</span><ol className="steps"><li><span>1</span><div><b>Соберите задачи</b><p>Загрузите фотографии и укажите правильные ответы.</p></div></li><li><span>2</span><div><b>Отправьте ссылку</b><p>Ученик откроет занятие на любом устройстве.</p></div></li><li><span>3</span><div><b>Посмотрите результат</b><p>Ответы, время и разбор каждой задачи — в одном отчёте.</p></div></li></ol></div><div className="rules-card"><ShieldCheck size={23}/><h3>Как проверяются ответы</h3><p>Пробелы по краям и регистр не важны. Числа 5, 5.0 и 5,00 равнозначны. Знаки − и - считаются одинаковыми.</p><p>Внутренние пробелы и выражения сравниваются буквально: 1/2 и 0.5 — разные ответы.</p></div><p className="privacy-note">Правильные ответы откроются ученику только после завершения попытки.</p></aside></div></main><footer className="footer"><span>TaskBattle</span><span>Меньше подготовки. Больше практики.</span></footer></>;
+
+    return <>
+        <SiteHeader/>
+        <main className="workspace creator-workspace">
+            <div className="page-heading">
+                <div><p className="eyebrow">ПОДГОТОВКА К ПРИКЛЮЧЕНИЮ</p><h1>Новое занятие</h1><p className="muted">Соберите задачи и пригласите ученика.</p></div>
+                <div className="duration-tag"><Hourglass size={21}/><span>Комната на <b>48 часов</b></span></div>
+            </div>
+            <div className="creator-grid">
+                <section className="panel editor" aria-label="Подготовка занятия">
+                    <div className="section-title"><span className="step">01</span><h2>Название занятия</h2><span className="muted small">необязательно</span></div>
+                    <Input className="text-input" aria-label="Название занятия" placeholder="Например, квадратные уравнения" maxLength={100} value={title} onChange={e => { resetCreation(); setTitle(e.target.value); }} disabled={busy}/>
+                    <div className="section-title task-title"><span className="step">02</span><h2>Задачи</h2><span className="counter">{tasks.length} / 12</span></div>
+                    <label className={'upload-area ' + (busy ? 'disabled' : '')} onDragOver={e => e.preventDefault()} onDrop={e => { e.preventDefault(); if (!busy) add(e.dataTransfer.files); }}>
+                        <input aria-label="Загрузить фотографии задач" type="file" accept="image/jpeg,image/png,image/webp" multiple disabled={busy} onChange={e => { add(e.target.files); e.target.value = ""; }}/>
+                        <img className="upload-book" src="/images/spellbook.webp" width="112" height="112" alt=""/>
+                        <div className="upload-copy"><strong>Добавить задачи</strong><span>Выберите фотографии или перетащите сюда</span><small>JPEG, PNG, WebP · до 3 МБ на файл<br/>До 12 задач и 18 МБ на комнату</small></div>
+                    </label>
+                    {tasks.length > 0 && <div className="draft-list">{tasks.map((task, i) => <div className="draft-task" key={task.id}>
+                        <div className="draft-photo"><img src={task.url} alt={'Задача ' + (i + 1)}/><span>{String(i+1).padStart(2,'0')}</span></div>
+                        <div className="draft-fields"><label htmlFor={task.id}>Задача {i+1} · правильный ответ</label><Input id={task.id} className="text-input" placeholder="Короткий ответ" maxLength={200} value={task.answer} disabled={busy} onChange={e => { resetCreation(); setTasks(ts => ts.map(t => t.id===task.id ? {...t,answer:e.target.value} : t)); }}/></div>
+                        <Button type="button" variant="ghost" className="icon-button" aria-label={'Удалить задачу ' + (i + 1)} disabled={busy} onClick={() => { resetCreation(); URL.revokeObjectURL(task.url); setTasks(ts => ts.filter(t => t.id !== task.id)); }}><Trash2 size={19}/></Button>
+                    </div>)}</div>}
+                    {progress && <p role="status" className="notice">{progress}</p>}
+                    {error && <p role="alert" className="error">{error}</p>}
+                    {recovering && <Button className="secondary" disabled={busy} onClick={checkPending}>Проверить создание</Button>}
+                    <div className="create-footer">
+                        <span className="muted small row"><Check size={16}/>{tasks.length ? 'Ответы: ' + tasks.filter(t => t.answer.trim()).length + ' из ' + tasks.length : 'Одна фотография — одна задача'}</span>
+                        <Button className="primary" disabled={busy || !tasks.length || tasks.some(t => !t.answer.trim())} onClick={create}>{busy ? 'Создаём комнату…' : error && creation.current ? 'Повторить создание' : 'Создать комнату'}<ArrowRight size={19}/></Button>
+                    </div>
+                </section>
+                <aside className="sidebar">
+                    <div className="adventure-card">
+                        <img src="/images/quest-landscape.webp" className="adventure-landscape" width="768" height="512" alt="Замок над озером в ночных горах"/>
+                        <div className="adventure-caption"><span className="eyebrow">TASKBATTLE</span><h2>Каждая задача —<br/>шаг вперёд</h2></div>
+                    </div>
+                    <div className="guide-card"><h3><ScrollText size={19}/>Ваш следующий шаг</h3><ol className="steps"><li><span>1</span><p>Создайте комнату с задачами.</p></li><li><span>2</span><p>Отправьте ученику приглашение.</p></li><li><span>3</span><p>Откройте результаты по секретной ссылке.</p></li></ol></div>
+                    <div className="rules-card"><h3><ShieldCheck size={20}/>Правила проверки</h3><p>Пробелы по краям и регистр не важны. 5, 5.0 и 5,00 — один ответ; − и - равнозначны.</p><p>Выражения сравниваются буквально: 1/2 и 0.5 — разные ответы.</p></div>
+                </aside>
+            </div>
+        </main>
+        <footer className="footer"><span>TaskBattle</span><span>Задачи на время</span></footer>
+    </>;
 }

@@ -58,13 +58,13 @@ export async function api<T>(path: string, key?: string, teacher = false, body?:
             error?: string;
         };
         if (!response.ok)
-            throw new ApiError(data.error || 'Не удалось выполнить запрос.', response.status);
+            throw new ApiError(data.error || 'Не удалось выполнить действие. Попробуйте ещё раз.', response.status);
         return data;
     }
     catch (e) {
         if (e instanceof ApiError)
             throw e;
-        throw new ApiError('Связь с сервером потеряна. Ответ сохранён на этом устройстве. Повторите отправку, когда появится сеть.', 0);
+        throw new ApiError('Связь прервалась. Проверьте интернет и повторите действие, не закрывая страницу.', 0);
     }
     finally {
         clearTimeout(timeout);

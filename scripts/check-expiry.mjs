@@ -15,6 +15,8 @@ const response=await fetch(state.base+'/api/cleanup',{method:'POST'});assert.equ
 assert.equal((await fetch(state.base+`/api/attempts/${state.attemptId}`,{headers:{'x-attempt-key':state.attemptKey}})).status,404);
 const oldRoom=state.roomId.split('.')[0]+'.1';assert.equal((await fetch(state.base+`/api/rooms/${oldRoom}`)).status,410);console.log('PASS cleanup removes expired photos and cascades records; expired links remain understandable');
 sql('DELETE FROM rate_limits');
-// Verify creation limit with tiny invalid requests: each attempt is counted before parsing.
-for(let i=0;i<5;i++)await fetch(state.base+'/api/rooms',{method:'POST',body:'bad'});
-assert.equal((await fetch(state.base+'/api/rooms',{method:'POST',body:'bad'})).status,429);console.log('PASS persistent creation rate limit');sql('DELETE FROM rate_limits');
+// Valid creation identities with missing photos count as failed new creations.
+// Recovery of existing creations intentionally does not consume this quota.
+function emptyCreation(){const form=new FormData();form.set('requestId',crypto.randomUUID());form.set('teacherKey',crypto.randomUUID().replaceAll('-','')+crypto.randomUUID().replaceAll('-',''));form.set('answers','[]');return form;}
+for(let i=0;i<5;i++)assert.equal((await fetch(state.base+'/api/rooms',{method:'POST',body:emptyCreation()})).status,400);
+assert.equal((await fetch(state.base+'/api/rooms',{method:'POST',body:emptyCreation()})).status,429);console.log('PASS persistent creation rate limit');sql('DELETE FROM rate_limits');

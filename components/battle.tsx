@@ -1,37 +1,13 @@
 "use client";
+import {Frame, Photo, Share, Report} from "@/components/quest-presentation";
 import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Zap, ArrowRight, Copy, Timer, Check, Maximize2, RotateCw, LockKeyhole, ArrowLeft } from 'lucide-react';
+import { ArrowRight, Check, RotateCw, ArrowLeft, Hourglass, Swords, ScrollText, ShieldCheck, Gem } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Progress } from '@/components/ui/progress';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Dialog, DialogContent, DialogTitle, DialogDescription, DialogClose } from '@/components/ui/dialog';
 import { api, ApiError, date, duration, newKey, readLocal, writeLocal, loadPhoto, type RoomData, type AttemptData } from '@/lib/client';
-function Frame({ children }: {
-    children: React.ReactNode;
-}) { return <><header className="topbar"><a className="brand" href="/"><span className="brand-icon"><Zap size={22} fill="currentColor"/></span>TaskBattle</a><span className="header-note">Задачи. Время. Результат.</span><span className="pill">Без регистрации</span></header><main className="workspace"><div className="content-narrow">{children}</div></main></>; }
-function Photo({ src, label, small = false }: {
-    src: string;
-    label: string;
-    small?: boolean;
-}) { const [zoom, setZoom] = useState(false); return <><button className="image-button" type="button" onClick={() => setZoom(true)} aria-label={`Увеличить: ${label}`}><img src={src} alt={label} style={small ? { height: 220 } : undefined}/><span className="row muted small" style={{ justifyContent: 'center', marginTop: 10 }}><Maximize2 size={15}/>Увеличить фотографию</span></button><Dialog open={zoom} onOpenChange={setZoom}><DialogContent className="zoom-content" showCloseButton={false}><div className="row spread"><DialogTitle>{label}</DialogTitle><DialogClose asChild><Button variant="outline">Закрыть</Button></DialogClose></div><DialogDescription>Масштабируйте фотографию жестом двумя пальцами или средствами браузера.</DialogDescription><img src={src} alt={label}/></DialogContent></Dialog></>; }
-function Share({ title, value, secret = false }: {
-    title: string;
-    value: string;
-    secret?: boolean;
-}) { const [copied, setCopied] = useState(false); const [failed, setFailed] = useState(false); return <div className={`copy-box ${secret ? 'secret-box' : ''}`}><h3 className="row">{secret && <LockKeyhole size={18}/>} {title}</h3><p className="muted small">{secret ? 'Сохраните эту ссылку. Не отправляйте её ученику: она открывает все результаты.' : 'Отправьте ученику. По одной ссылке можно решать с разных устройств.'}</p><Input className="text-input" readOnly aria-label={title} value={value} onFocus={e => e.target.select()}/><Button className="secondary" variant="outline" onClick={async () => { try {
-    await navigator.clipboard.writeText(value);
-    setCopied(true);
-    setFailed(false);
-}
-catch {
-    setFailed(true);
-} }}>{copied ? <Check size={18}/> : <Copy size={18}/>} {copied ? 'Ссылка скопирована' : secret ? 'Скопировать секретную ссылку' : 'Скопировать ссылку'}</Button>{failed && <p className="small muted">Выделите ссылку в поле и скопируйте вручную.</p>}</div>; }
-function Report({ data, photos }: {
-    data: AttemptData;
-    photos: Record<string, string>;
-}) { const s = data.summary!; return <div className="stack"><div><p className="eyebrow">ПОПЫТКА ЗАВЕРШЕНА</p><h1>Ваш результат</h1><p className="muted">{data.title} · начало {date(data.startedAt)}</p></div><div className="stat-grid"><div className="stat"><strong>{s.correct} из {s.count}</strong><span>Правильных ответов</span></div><div className="stat"><strong>{duration(s.totalMs)}</strong><span>Общее время</span></div><div className="stat"><strong>{duration(s.averageMs)}</strong><span>В среднем на задачу</span></div></div><div className="panel page-card stack"><p><b>Самые быстрые:</b> № {s.fastest.ordinals.join(', ')} · {duration(s.fastest.durationMs)}</p><p><b>Самые долгие:</b> № {s.slowest.ordinals.join(', ')} · {duration(s.slowest.durationMs)}</p><p className="time-note">Время в формате минуты:секунды,миллисекунды. При равном времени показаны все задачи. Номера соответствуют исходному набору преподавателя.</p></div><h2>Разбор задач</h2>{data.report!.map(t => <article className="panel report-task stack" key={t.id}><div className="row spread"><h3>Задача № {t.ordinal}</h3><span className={`status ${t.correct ? 'correct' : 'wrong'}`}>{t.correct ? 'Верно' : 'Неверно'}</span></div>{photos[t.id] ? <Photo src={photos[t.id]} label={`Задача № ${t.ordinal}`} small/> : <p className="muted">Фотография загружается…</p>}<dl className="answer-grid"><div><dt>Ответ ученика</dt><dd>{t.answer}</dd></div><div><dt>Правильный ответ</dt><dd>{t.correctAnswer}</dd></div><div><dt>Время решения</dt><dd>{duration(t.durationMs)}</dd></div></dl></article>)}</div>; }
 export default function Battle({ view }: {
     view: string[];
 }) {
@@ -57,8 +33,9 @@ export default function Battle({ view }: {
     latest.current = data;
     const a = (kind === 'attempt' || reportId) ? data as AttemptData | null : null;
     const position = a?.position;
+    useEffect(() => { if (a?.finishedAt) window.scrollTo({top:0,behavior:'auto'}); }, [a?.finishedAt]);
     function onError(e: unknown) { if (e instanceof ApiError && e.status === 410)
-        setExpired(true); setError(e instanceof Error ? e.message : 'Не удалось загрузить данные.'); }
+        setExpired(true); setError(e instanceof Error ? e.message : 'Не удалось открыть занятие. Попробуйте ещё раз.'); }
     function accept(d: RoomData | AttemptData) { setData(d); setOffset(d.serverNow - Date.now()); setNow(d.serverNow); setError(''); }
     async function refresh() { try {
         const path = kind === 'room' ? `/rooms/${id}` : kind === 'teacher' && !reportId ? `/rooms/${id}/teacher` : `/attempts/${reportId || id}${reportId ? '/report' : ''}`;
@@ -71,7 +48,7 @@ export default function Battle({ view }: {
     useEffect(() => { if (kind === 'room' || key)
         void refresh();
     else if (origin)
-        setError('Нужна полная секретная ссылка, включая часть после #.'); }, [id, kind, key, reportId, origin]);
+        setError('Откройте полную секретную ссылку. Возможно, при копировании потерялась её часть.'); }, [id, kind, key, reportId, origin]);
     useEffect(() => { const timer = setInterval(() => setNow(Date.now() + offset), 200); return () => clearInterval(timer); }, [offset]);
     useEffect(() => { if (data && now >= data.expiresAt) {
         setExpired(true);
@@ -143,21 +120,36 @@ export default function Battle({ view }: {
                 throw new Error('Ожидается пустой объект'); const d = latest.current as AttemptData | null; return d ? { position: d.position, count: d.count, finished: d.finishedAt !== null } : null; } }, { signal: lifecycle.signal })).catch(() => { });
     }
     catch { } return () => lifecycle.abort(); }, [kind, id]);
-    if (expired)
-        return <Frame><div className="panel page-card stack"><Timer size={36} color="#345be8"/><h1>Срок действия комнаты истёк</h1><p className="muted">Комната доступна 48 часов с момента создания. Попросите преподавателя создать новое занятие.</p><a className="link-text" href="/">На главную</a></div></Frame>;
-    if (!data)
-        return <Frame><div className="panel page-card stack">{error ? <><h1>Не удалось открыть занятие</h1><p role="alert" className="error">{error}</p><Button className="secondary" variant="outline" onClick={refresh}>Повторить</Button></> : <><p>Загружаем занятие…</p><Skeleton className="h-10 w-3/4"/><Skeleton className="h-60 w-full"/></>}</div></Frame>;
-    const common = <>{error && <p className="error" role="alert">{error}{kind === 'attempt' && <Button variant="outline" className="secondary" onClick={refresh}>Обновить состояние</Button>}</p>}{photoError && <div className="error" role="alert">{photoError}<Button variant="outline" className="secondary" onClick={() => { setData(null); void refresh(); }}>Повторить загрузку фото</Button></div>}</>;
-    if (kind === 'room')
-        return <Frame><div className="panel page-card stack"><p className="eyebrow">ГОТОВЫ К ПРАКТИКЕ?</p><h1>{data.title}</h1><div className="row"><span className="start-number">{data.count}</span><span className="muted">задач в занятии<br />в случайном порядке</span></div><ol className="start-rules"><li>После старта начнётся общий таймер.</li><li>Решайте задачи по одной и вводите короткий ответ.</li><li>Ответьте на все задачи, чтобы увидеть результат.</li></ol><p className="notice">Таймер продолжает идти при обновлении, сворачивании и потере сети. Возвращайтесь в эту вкладку, чтобы продолжить.</p><p className="time-note">Время фиксируется сервером: от получения «Старт» до получения последнего ответа. Следующая задача начинается при принятии предыдущего ответа. Сетевые задержки входят во время; фотографии загружаются заранее. Если ответ уже принят, его безопасный повтор не меняет время.</p>{common}<Button className="primary" disabled={busy || !loaded} onClick={start}>{busy ? 'Запускаем…' : loaded ? 'Старт' : 'Загружаем фотографии…'}<ArrowRight size={20}/></Button><p className="small muted">Доступ до {date(data.expiresAt)}. До 120 попыток на комнату.</p></div></Frame>;
-    if (kind === 'teacher' && !reportId)
-        return <Frame><div className="stack"><div><p className="eyebrow">КАБИНЕТ ПРЕПОДАВАТЕЛЯ</p><h1>{data.title}</h1><p className="muted">{data.count} задач · доступ до {date(data.expiresAt)}</p></div><div className="panel page-card stack"><Share title="Ссылка для ученика" value={`${origin}/room/${id}`}/><Share title="Секретная ссылка преподавателя" value={`${origin}/teacher/${id}#${key}`} secret/></div><div className="row spread"><h2>Попытки · {data.attempts?.length || 0} / 120</h2><Button variant="outline" className="secondary" onClick={refresh}><RotateCw size={17}/> Обновить</Button></div>{common}<div className="panel page-card stack">{!data.attempts?.length ? <p className="empty-message">Здесь появятся попытки учеников.<br />Список обновляется каждые 15 секунд.</p> : data.attempts.map(t => <a className="attempt-link" href={`/teacher/${id}/attempt/${t.id}#${key}`} key={t.id}><div><b>Попытка № {t.number}</b><small>{date(t.startedAt)}</small></div><span className="small">{t.finishedAt ? 'Открыть отчёт' : `Решает · ${t.position} из ${data.count}`} →</span></a>)}</div></div></Frame>;
-    if (a?.finishedAt !== null && a?.report)
-        return <Frame><div className="stack">{reportId && <a className="link-text row" href={`/teacher/${id}#${key}`}><ArrowLeft size={16}/>Все попытки</a>}{common}<Report data={a} photos={photos}/>{!reportId && <Button variant="outline" className="secondary" onClick={() => { writeLocal(`start:${a.roomId}`, null); router.push(`/room/${a.roomId}`); }}>Решить ещё раз</Button>}<p className="small muted">Отчёт доступен до {date(data.expiresAt)}.</p></div></Frame>;
-    if (reportId)
-        return <Frame><div className="panel page-card stack"><h1>Ученик решает задачи</h1><p>Пройдено {a?.position} из {data.count}. Отчёт появится после завершения.</p>{common}<Button variant="outline" className="secondary" onClick={refresh}>Обновить</Button><a className="link-text" href={`/teacher/${id}#${key}`}>Все попытки</a></div></Frame>;
-    if (!a || !a.tasks[a.position])
-        return <Frame><p className="error">Страница не найдена.</p></Frame>;
-    const task = a.tasks[a.position];
-    return <Frame><div className="panel page-card"><div className="row spread"><div><p className="eyebrow">{a.title}</p><h2 style={{ marginTop: 8 }}>Задача {a.position + 1} из {a.count}</h2></div><div className="row"><Timer size={21}/><span className="timer" aria-label="Общий таймер">{duration(now - a.startedAt, false)}</span></div></div><div className="progress-area"><Progress value={a.position / a.count * 100} aria-label="Прогресс попытки"/></div>{photos[task.id] ? <Photo src={photos[task.id]} label={`Задача ${a.position + 1}`}/> : <Skeleton className="h-64 w-full"/>}<form className="answer-form" onSubmit={e => { e.preventDefault(); void submit(); }}><Input ref={input} className="text-input" aria-label="Ваш ответ" placeholder="Ваш ответ" autoComplete="off" autoCapitalize="off" autoCorrect="off" spellCheck={false} inputMode="text" enterKeyHint="send" maxLength={200} value={answer} disabled={busy || pending || !photos[task.id]} onChange={e => { setAnswer(e.target.value); writeLocal(`draft:${a.attemptId}:${a.position}`, { answer: e.target.value }); }}/><Button type="submit" className="primary" disabled={busy || !answer.trim() || !photos[task.id]}>{busy ? 'Сохраняем…' : pending ? 'Повторить отправку' : 'Ответить'}<ArrowRight size={19}/></Button></form>{common}<p className="time-note" style={{ marginTop: 18 }}>Enter — отправить ответ. Проверка и правильные ответы появятся в конце. Время продолжает идти, даже если закрыть экран.</p></div></Frame>;
+    if (expired) return <Frame><div className="panel state-card stack"><Hourglass size={38}/><h1>Срок действия комнаты истёк</h1><p className="muted">Прошло 48 часов. Попросите преподавателя создать новое занятие.</p><a className="link-text" href="/">На главную</a></div></Frame>;
+    if (!data) return <Frame><div className="panel state-card stack">{error?<><ScrollText size={34}/><h1>Не удалось открыть занятие</h1><p role="alert" className="error">{error}</p><Button className="secondary" variant="outline" onClick={refresh}>Повторить</Button></>:<><p role="status">Загружаем занятие…</p><Skeleton className="h-10 w-3/4"/><Skeleton className="h-60 w-full"/></>}</div></Frame>;
+    const common=<>{error&&<div className="error" role="alert">{error}{kind==='attempt'&&<Button variant="outline" className="secondary" onClick={refresh}>Продолжить с сохранённого места</Button>}</div>}{photoError&&<div className="error" role="alert">{photoError}<Button variant="outline" className="secondary" onClick={()=>{setData(null);void refresh();}}>Повторить загрузку фото</Button></div>}</>;
+    if (kind==='room') return <Frame><div className="panel start-card">
+        <div className="start-content"><p className="eyebrow">НАЧАТЬ ИСПЫТАНИЕ</p><h1>{data.title}</h1>
+            <div className="start-count"><span className="start-number">{data.count}</span><span className="muted">{data.count===1?'задача':data.count<5?'задачи':'задач'}<br/>в случайном порядке</span></div>
+            <ol className="start-rules"><li><Swords size={19}/><span>Нажмите «Старт» — начнётся отсчёт.</span></li><li><ScrollText size={19}/><span>Решайте по одной задаче и вводите короткий ответ.</span></li><li><ShieldCheck size={19}/><span>Разбор всех ответов появится в конце.</span></li></ol>
+            <p className="notice">Таймер идёт и во время перерывов. Сетевые задержки тоже входят во время.</p>
+            {common}<Button className="primary start-button" disabled={busy||!loaded} onClick={start}><Swords size={24}/>{busy?'Запускаем…':loaded?'Старт':'Загружаем фотографии…'}</Button>
+            <p className="start-expiry">Доступ до {date(data.expiresAt)}</p>
+        </div>
+        <div className="start-art" aria-hidden="true"><img src="/images/quest-landscape.webp" width="1200" height="800" alt=""/><img className="start-emblem" src="/images/quest-emblem.webp" width="125" height="125" alt=""/></div>
+    </div></Frame>;
+    if(kind==='teacher'&&!reportId) return <Frame><div className="stack">
+        <div className="teacher-heading"><img src="/images/quest-emblem.webp" width="75" height="85" alt=""/><div><p className="eyebrow"><Check size={14}/>КОМНАТА ГОТОВА</p><h1>{data.title}</h1><p className="teacher-meta">Задач: {data.count}<span aria-hidden="true">·</span>Доступ до {date(data.expiresAt)}</p></div></div>
+        <div className="copy-grid"><Share title="Ссылка для ученика" value={origin+'/room/'+id}/><Share title="Секретная ссылка преподавателя" value={origin+'/teacher/'+id+'#'+key} secret/></div>
+        <div className="row spread"><h2>Попытки <span className="muted small">{data.attempts?.length||0} / 120</span></h2><Button variant="outline" className="secondary" onClick={refresh}><RotateCw size={17}/>Обновить</Button></div>
+        {common}<div className="panel page-card stack">{!data.attempts?.length?<div className="empty-message"><img src="/images/spellbook.webp" width="78" height="78" alt=""/><strong>Всё готово к первому испытанию</strong><p className="small">Здесь появятся попытки учеников.</p></div>:data.attempts.map(t=><a className="attempt-link" href={'/teacher/'+id+'/attempt/'+t.id+'#'+key} key={t.id}><div><b>Попытка № {t.number}</b><small>{date(t.startedAt)}</small></div><span className="small row">{t.finishedAt?'Открыть отчёт':'Решает · '+t.position+' из '+data.count}<ArrowRight size={16}/></span></a>)}</div>
+    </div></Frame>;
+    if(a?.finishedAt!==null&&a?.report) return <Frame><div className="stack">{reportId&&<a className="link-text row" href={'/teacher/'+id+'#'+key}><ArrowLeft size={16}/>Все попытки</a>}{common}<Report data={a} photos={photos}/>{!reportId&&<Button variant="outline" className="secondary" onClick={()=>{writeLocal('start:'+a.roomId,null);router.push('/room/'+a.roomId);}}><Swords size={19}/>Решить ещё раз</Button>}<p className="small muted">Отчёт доступен до {date(data.expiresAt)}.</p></div></Frame>;
+    if(reportId) return <Frame><div className="panel state-card stack"><Hourglass size={36}/><h1>Испытание продолжается</h1><p className="muted">Решено {a?.position} из {data.count} задач. Отчёт появится после завершения.</p>{common}<Button variant="outline" className="secondary" onClick={refresh}>Обновить</Button><a className="link-text" href={'/teacher/'+id+'#'+key}>Все попытки</a></div></Frame>;
+    if(!a||!a.tasks[a.position]) return <Frame><div className="panel state-card stack"><h1>Страница не найдена</h1><p className="muted">Проверьте ссылку на занятие.</p><a className="link-text" href="/">На главную</a></div></Frame>;
+    const task=a.tasks[a.position];
+    return <Frame focus><div className="panel page-card solve-card">
+        <div className="row spread solve-heading"><div><p className="eyebrow">{a.title}</p><h2>Задача {a.position+1} из {a.count}</h2></div><div className="timer-box"><Hourglass size={23}/><div><small>Общее время</small><span className="timer" aria-label="Общий таймер">{duration(now-a.startedAt,false)}</span></div></div></div>
+        <div className="progress-area"><Progress className="progress-line" value={a.position/a.count*100} aria-label="Прогресс попытки"/><div className="rune-track" aria-hidden="true">{a.tasks.map((t,i)=><span key={t.id} className={'rune '+(i<a.position?'complete':i===a.position?'current':'')}>{i<a.position?<Check size={13}/>:i===a.position?<Gem size={15}/>:i+1}</span>)}</div></div>
+        {photos[task.id]?<Photo src={photos[task.id]} label={'Задача '+(a.position+1)}/>:<Skeleton className="h-64 w-full"/>}
+        <form className="answer-form" onSubmit={e=>{e.preventDefault();void submit();}}>
+            <Input ref={input} className="text-input" aria-label="Ваш ответ" placeholder="Ваш ответ" autoComplete="off" autoCapitalize="off" autoCorrect="off" spellCheck={false} inputMode="text" enterKeyHint="send" maxLength={200} value={answer} disabled={busy||pending||!photos[task.id]} onChange={e=>{setAnswer(e.target.value);writeLocal('draft:'+a.attemptId+':'+a.position,{answer:e.target.value});}}/>
+            <Button type="submit" className="primary" disabled={busy||!answer.trim()||!photos[task.id]}>{busy?'Сохраняем…':pending?'Повторить отправку':'Ответить'}<ArrowRight size={19}/></Button>
+        </form>{common}<p className="time-note solve-note">Enter — отправить ответ. Результаты — после последней задачи.</p>
+    </div></Frame>;
 }
