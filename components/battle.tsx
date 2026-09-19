@@ -185,7 +185,7 @@ export default function Battle({ view }: { view: string[] }) {
               : 'Срок действия комнаты истёк'}
           </h1>
           <p className="muted">Попросите преподавателя создать новое занятие.</p>
-          <Link className="link-text" href="/">
+          <Link prefetch={false} className="link-text" href="/">
             На главную
           </Link>
         </div>
@@ -410,7 +410,7 @@ export default function Battle({ view }: { view: string[] }) {
         <div className="panel state-card stack">
           <h1>Страница не найдена</h1>
           <p className="muted">Проверьте ссылку на занятие.</p>
-          <Link className="link-text" href="/">
+          <Link prefetch={false} className="link-text" href="/">
             На главную
           </Link>
         </div>
