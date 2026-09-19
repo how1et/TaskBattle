@@ -18,7 +18,7 @@ r=await fetch(base+'/api/rooms',{method:'POST',body:await form()});assert.equal(
 const publicRoom=(await call('/rooms/'+roomId)).data;assert.equal(publicRoom.count,25);assert.equal(JSON.stringify(publicRoom).includes('answer'),false);assert.equal((await call('/rooms/'+roomId+'/teacher')).status,403);
 const attemptKey=key(),attemptId=crypto.randomUUID(),secondKey=key(),secondId=crypto.randomUUID();
 let a=(await call(`/rooms/${roomId}/start`,{method:'POST',body:{attemptId,attemptKey}})).data;await call(`/rooms/${roomId}/start`,{method:'POST',body:{attemptId:secondId,attemptKey:secondKey}});
-const order=a.tasks;assert.equal(a.taskStartedAt,null);assert.equal((await call(`/attempts/${attemptId}`,{secret:secondKey})).status,403);
+const order=a.tasks;assert.deepEqual(order.map(t=>t.ordinal),Array.from({length:25},(_,i)=>i+1));assert.equal(a.taskStartedAt,null);assert.equal((await call(`/attempts/${attemptId}`,{secret:secondKey})).status,403);
 let total=0;
 for(let position=0;position<count;position++){
  const ready=(await call(`/attempts/${attemptId}/ready`,{method:'POST',secret:attemptKey,body:{position,taskId:a.tasks[position].id,readyId:crypto.randomUUID(),startedAt:Date.now()}}));assert.equal(ready.status,200,JSON.stringify(ready.data));a=ready.data;
@@ -28,7 +28,7 @@ for(let position=0;position<count;position++){
  // above its former 1 MiB ceiling, not just the directly imported API handler.
  const file=position===0?new File([largePng],'solution.png',{type:'image/png'}):undefined;
  if(position===0){const both=await Promise.all([1,2].map(()=>call(`/attempts/${attemptId}/answers`,{method:'POST',secret:attemptKey,body:payload,file})));assert.ok(both.every(x=>x.status===200),JSON.stringify(both));a=both[0].data;assert.equal((await call(`/attempts/${attemptId}/answers`,{method:'POST',secret:attemptKey,body:{...payload,answer:'other'},file})).status,409);}
- else if(position===1){const proxy=createServer(async(req,res)=>{for await(const ignored of req){}await call(`/attempts/${attemptId}/answers`,{method:'POST',secret:attemptKey,body:payload});res.destroy();});await new Promise(resolve=>proxy.listen(0,'127.0.0.1',resolve));await assert.rejects(fetch(`http://127.0.0.1:${proxy.address().port}`,{method:'POST',body:'test'}));await new Promise(resolve=>proxy.close(resolve));a=(await call(`/attempts/${attemptId}/answers`,{method:'POST',secret:attemptKey,body:payload})).data;}
+ else if(position===1){const proxy=createServer(async(req,res)=>{for await(const _ignored of req){}await call(`/attempts/${attemptId}/answers`,{method:'POST',secret:attemptKey,body:payload});res.destroy();});await new Promise(resolve=>proxy.listen(0,'127.0.0.1',resolve));await assert.rejects(fetch(`http://127.0.0.1:${proxy.address().port}`,{method:'POST',body:'test'}));await new Promise(resolve=>proxy.close(resolve));a=(await call(`/attempts/${attemptId}/answers`,{method:'POST',secret:attemptKey,body:payload})).data;}
  else{const out=await call(`/attempts/${attemptId}/answers`,{method:'POST',secret:attemptKey,body:payload});assert.equal(out.status,200,JSON.stringify(out));a=out.data;}
  assert.equal(a.position,position+1);assert.equal(a.completedMs,total);assert.deepEqual(a.tasks,order);if(position<24){assert.equal(a.taskStartedAt,null);assert.equal(JSON.stringify(a).includes('correctAnswer'),false);}
 }
