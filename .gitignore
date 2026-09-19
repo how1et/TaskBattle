@@ -47,3 +47,13 @@ next-env.d.ts
 /.codex/
 /outputs/
 /work/
+
+# Local secrets, uploads and verification artifacts
+.dev.vars*
+/uploads/
+/test-photos/
+/ordered-photos/
+/integration-state.json
+/latency.json
+/latency-events.jsonl
+*.tar.gz

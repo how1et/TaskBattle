@@ -12,7 +12,27 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    "dist/**",
+    ".wrangler/**",
+    ".sites-runtime/**",
   ]),
+  {
+    rules: {
+      // Photos use authorized Blob URLs and are already resized before upload.
+      "@next/next/no-img-element": "off",
+      "@typescript-eslint/no-unused-vars": ["warn", { "argsIgnorePattern": "^_", "varsIgnorePattern": "^_" }],
+    },
+  },
+  {
+    files: ["components/battle.tsx", "components/use-*.ts", "components/report-photo.tsx", "components/solver-timer.tsx"],
+    rules: {
+      // These hooks synchronize explicit external controllers/resources. React
+      // Compiler is not enabled; hook ordering/dependency checks remain active.
+      "react-hooks/set-state-in-effect": "off",
+      "react-hooks/refs": "off",
+      "react-hooks/purity": "off",
+    },
+  },
   {
     files: ["components/ui/**/*.{ts,tsx}", "hooks/use-mobile.ts"],
     rules: {
