@@ -34,6 +34,14 @@ const eslintConfig = defineConfig([
     },
   },
   {
+    files: ["components/battle.tsx", "components/site-header.tsx"],
+    rules: {
+      // Vinext 1 beta's Link transition throws in this production bundle.
+      // Explicit navigation out of an attempt uses ordinary, reliable anchors.
+      "@next/next/no-html-link-for-pages": "off",
+    },
+  },
+  {
     files: ["components/ui/**/*.{ts,tsx}", "hooks/use-mobile.ts"],
     rules: {
       // These files are vendored verbatim from shadcn@4.17.0. Keep the

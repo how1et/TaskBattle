@@ -22,7 +22,6 @@ import {
   ScrollText,
   Swords,
 } from 'lucide-react';
-import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useRef, useState } from 'react';
 export default function Battle({ view }: { view: string[] }) {
@@ -185,9 +184,9 @@ export default function Battle({ view }: { view: string[] }) {
               : 'Срок действия комнаты истёк'}
           </h1>
           <p className="muted">Попросите преподавателя создать новое занятие.</p>
-          <Link prefetch={false} className="link-text" href="/">
+          <a className="link-text" href="/">
             На главную
-          </Link>
+          </a>
         </div>
       </Frame>
     );
@@ -410,9 +409,9 @@ export default function Battle({ view }: { view: string[] }) {
         <div className="panel state-card stack">
           <h1>Страница не найдена</h1>
           <p className="muted">Проверьте ссылку на занятие.</p>
-          <Link prefetch={false} className="link-text" href="/">
+          <a className="link-text" href="/">
             На главную
-          </Link>
+          </a>
         </div>
       </Frame>
     );
