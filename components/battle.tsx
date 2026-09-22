@@ -56,7 +56,12 @@ export default function Battle({ view }: { view: string[] }) {
   }, []);
   const accept = useCallback((d: RoomData | AttemptData) => {
     const old = latest.current as AttemptData | null;
-    if ('attemptId' in d && old?.attemptId === d.attemptId && old.position > d.position) return;
+    if (
+      'attemptId' in d &&
+      old?.attemptId === d.attemptId &&
+      (old.position > d.position || (old.finishedAt !== null && d.finishedAt === null))
+    )
+      return;
     d.clockOffset ??= old?.clockOffset ?? d.serverNow - Date.now();
     setData(d);
     setOffset(d.clockOffset);
@@ -100,10 +105,15 @@ export default function Battle({ view }: { view: string[] }) {
     };
   }, [expiresAt, offset]);
   useEffect(() => {
-    if (expiresAt !== undefined && now >= expiresAt) {
+    if (
+      expiresAt !== undefined &&
+      now >= expiresAt &&
+      !active &&
+      !(reportId && a?.finishedAt === null)
+    ) {
       setExpired(true);
     }
-  }, [now, expiresAt]);
+  }, [now, expiresAt, active, reportId, a?.finishedAt]);
   useEffect(() => {
     if (kind === 'teacher' && !reportId && key) {
       const interval = setInterval(() => {
@@ -279,7 +289,9 @@ export default function Battle({ view }: { view: string[] }) {
               {busy ? 'Готовим задачи…' : 'Старт'}
             </Button>
           </div>
-          <p className="start-expiry">Доступ до {date(data.expiresAt)}</p>
+          <p className="start-expiry">
+            Доступ до {date(data.expiresAt)}. На попытку — 24 часа с нажатия «Старт».
+          </p>
         </section>
       </Frame>
     );
@@ -344,7 +356,11 @@ export default function Battle({ view }: { view: string[] }) {
                   </div>
                   <span className="small row">
                     {t.finishedAt
-                      ? 'Открыть отчёт'
+                      ? t.finishReason === 'manual'
+                        ? 'Завершено досрочно · отчёт'
+                        : t.finishReason === 'timeout'
+                          ? 'Истекло время · отчёт'
+                          : 'Открыть отчёт'
                       : 'Решает · ' + t.position + ' из ' + data.count}
                     <ArrowRight size={16} />
                   </span>

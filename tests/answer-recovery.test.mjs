@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
+import { loadModule } from './load-module.mjs';
 import ts from 'typescript';
 async function module(path) {
   let s = await readFile(new URL(path, import.meta.url), 'utf8');
@@ -16,7 +17,7 @@ async function module(path) {
       ).toString('base64')
   );
 }
-const { SolverMachine } = await module('../lib/solver-machine.ts');
+const { SolverMachine } = await loadModule('../lib/solver-machine.ts');
 const photo = new File(['camera bytes'], 'solution.jpg', { type: 'image/jpeg' });
 const defer = () => {
   let resolve, reject;
@@ -37,7 +38,7 @@ function fixture(overrides = {}) {
     mono += n;
   };
   const server = {
-    attemptId: 'test-attempt',
+    attemptId: crypto.randomUUID(),
     position: 0,
     count: 1,
     timingVersion: 2,
@@ -406,4 +407,139 @@ test('frozen metadata is persisted before a delayed ready request and survives f
   g.advance(8000);
   assert.equal(g.m.time, 1700);
   assert.equal(g.m.state.phase, 'failed');
+});
+
+test('finish freezes empty answer immediately, never submits a draft, duplicate retry preserves time', async () => {
+  const gate = defer();
+  let calls = 0,
+    payload;
+  const f = fixture({
+    finish: async (a, i) => {
+      calls++;
+      payload = i;
+      return gate.promise;
+    },
+  });
+  await f.ready();
+  f.m.changeAnswer('');
+  f.advance(3210);
+  const request = f.m.finish();
+  assert.equal(f.m.time, 3210);
+  f.advance(40000);
+  await f.m.finish();
+  assert.equal(calls, 1);
+  assert.equal(f.m.time, 3210);
+  assert.equal(f.sends.length, 0);
+  gate.reject(new Error('offline'));
+  await request;
+  assert.equal(f.m.state.phase, 'finish-failed');
+  f.io.finish = async (a, i) => {
+    assert.deepEqual(i, payload);
+    return { ...a, finishedAt: 9, finishReason: 'manual' };
+  };
+  await f.m.finish();
+  assert.equal(f.m.state.phase, 'finished');
+  assert.equal(f.m.time, 3210);
+});
+test('finish failure survives controller reload with frozen time and same operation', async () => {
+  let intent;
+  const f = fixture({
+    finish: async (a, i) => {
+      intent = i;
+      throw new Error('offline');
+    },
+  });
+  await f.ready();
+  f.advance(4000);
+  await f.m.finish();
+  f.m.dispose();
+  f.advance(60000);
+  const reloaded = new SolverMachine(f.m.server, {
+    ...f.io,
+    finish: async (a, i) => {
+      assert.deepEqual(i, intent);
+      return { ...a, finishedAt: 1 };
+    },
+  });
+  await reloaded.init();
+  assert.equal(reloaded.time, 4000);
+  assert.equal(reloaded.state.phase, 'finished');
+});
+test('finish during sending keeps frozen timer and suppresses late active snapshot', async () => {
+  const answer = defer(),
+    finish = defer();
+  const f = fixture({ send: async () => answer.promise, finish: async () => finish.promise });
+  f.m.server.count = 2;
+  await f.ready();
+  f.advance(5000);
+  const sent = f.m.submit();
+  await Promise.resolve();
+  await Promise.resolve();
+  f.advance(20000);
+  const ended = f.m.finish();
+  assert.equal(f.m.time, 5000);
+  answer.resolve({ ...f.m.server, position: 1, finishedAt: null });
+  await sent;
+  assert.equal(f.m.state.phase, 'finishing');
+  assert.ok(!f.accepted.some((a) => a.position === 1));
+  finish.resolve({ ...f.m.server, position: 1, finishedAt: 1 });
+  await ended;
+  assert.equal(f.m.state.phase, 'finished');
+});
+test('late ready and photo preparation cannot reopen a manually finished attempt', async () => {
+  const ready = defer(),
+    photoGate = defer();
+  const f = fixture({
+    ready: async () => ready.promise,
+    prepare: async () => photoGate.promise,
+    finish: async (a) => ({ ...a, finishedAt: 1 }),
+  });
+  await f.m.init();
+  const shown = f.m.show();
+  const prepared = f.m.selectPhoto(photo);
+  f.advance(700);
+  await f.m.finish();
+  photoGate.resolve(photo);
+  await prepared;
+  ready.resolve({ ...f.m.server, readyId: 'late', taskStartedAt: 100000 });
+  await shown;
+  assert.equal(f.m.state.phase, 'finished');
+  assert.equal(f.m.state.draft.photo, null);
+  assert.equal(f.accepted.filter((a) => a.finishedAt !== null).length, 1);
+});
+test('deadline recovery requests server result without submitting draft or fabricated elapsed 24h', async () => {
+  const f = fixture({ check: async (a) => ({ ...a, finishedAt: 1, finishReason: 'timeout' }) });
+  await f.ready();
+  f.advance(1234);
+  await f.m.finish(true);
+  assert.equal(f.m.state.phase, 'finished');
+  assert.equal(f.sends.length, 0);
+});
+test('manual finish waits for draft restoration; early local deadline restores active solver', async () => {
+  const loaded = defer();
+  let finishes = 0;
+  const f = fixture({
+    read: async () => loaded.promise,
+    finish: async (a) => {
+      finishes++;
+      return { ...a, finishedAt: 1 };
+    },
+  });
+  const init = f.m.init();
+  await f.m.finish();
+  assert.equal(finishes, 0);
+  loaded.resolve({});
+  await init;
+  await f.m.show();
+  f.advance(2300);
+  await f.m.finish(true);
+  assert.equal(f.m.state.phase, 'preparing');
+  assert.equal(f.m.time, 2300);
+  await f.m.show();
+  f.m.changeAnswer('5');
+  f.advance(1000);
+  assert.equal(f.m.time, 3300);
+  await f.m.finish();
+  assert.equal(finishes, 1);
+  assert.equal(f.m.state.phase, 'finished');
 });

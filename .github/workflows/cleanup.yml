@@ -22,6 +22,8 @@ jobs:
             result=$(curl --fail-with-body --silent --show-error --max-time 60 --request POST "${TASKBATTLE_URL%/}/api/cleanup")
             echo "$result"
             count=$(printf '%s' "$result" | jq '.deletedFiles')
-            if [ "$count" -lt 500 ]; then exit 0; fi
+            finalized=$(printf '%s' "$result" | jq '.finalized // 0')
+            deleted=$(printf '%s' "$result" | jq '.deletedAttempts // 0')
+            if [ "$count" -lt 500 ] && [ "$finalized" -lt 500 ] && [ "$deleted" -lt 500 ]; then exit 0; fi
             sleep 65
           done

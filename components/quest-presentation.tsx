@@ -158,6 +158,10 @@ export function Report({
         <div className="result-heading">
           <p className="eyebrow">{data.title}</p>
           <h1>Испытание завершено</h1>
+          {data.finishReason === 'manual' && <p className="notice">Тест завершён досрочно</p>}
+          {data.finishReason === 'timeout' && (
+            <p className="notice">Попытка завершена: прошло 24 часа</p>
+          )}
           <p className="result-date">Начало: {date(data.startedAt)}</p>
         </div>
         <div className="mentor-scene">
@@ -191,17 +195,45 @@ export function Report({
             <div className="time-stat">
               <Timer size={20} />
               <span>В среднем на задачу</span>
-              <strong>{duration(s.averageMs)}</strong>
+              <strong>{s.averageMs === null ? '—' : duration(s.averageMs)}</strong>
             </div>
           </div>
         </div>
+        <div className="partial-stats">
+          <span>
+            Отправлено:{' '}
+            <b>
+              {s.submitted} из {s.count}
+            </b>
+          </span>
+          <span>
+            Неверно: <b>{s.wrong}</b>
+          </span>
+          <span>
+            Не решено: <b>{s.unsolved}</b>
+          </span>
+        </div>
+        {data.timingIncomplete && (
+          <p className="notice small">
+            Время незавершённой задачи не удалось восстановить. Общее время включает только
+            сохранённые интервалы решения.
+          </p>
+        )}
+        {data.unfinishedMs > 0 && (
+          <p className="small muted">
+            В общем времени учтена незавершённая задача: {duration(data.unfinishedMs)}. Среднее — по
+            отправленным ответам.
+          </p>
+        )}
         <div className="extrema">
           <div>
             <Gauge size={20} />
             <div>
               <strong>Быстрее всего</strong>
               <p>
-                № {s.fastest.ordinals.join(', ')} · {duration(s.fastest.durationMs)}
+                {s.fastest
+                  ? `№ ${s.fastest.ordinals.join(', ')} · ${duration(s.fastest.durationMs)}`
+                  : '—'}
               </p>
             </div>
           </div>
@@ -210,7 +242,9 @@ export function Report({
             <div>
               <strong>Больше всего времени</strong>
               <p>
-                № {s.slowest.ordinals.join(', ')} · {duration(s.slowest.durationMs)}
+                {s.slowest
+                  ? `№ ${s.slowest.ordinals.join(', ')} · ${duration(s.slowest.durationMs)}`
+                  : '—'}
               </p>
             </div>
           </div>
@@ -224,9 +258,13 @@ export function Report({
         <article className="panel report-task stack" key={t.id}>
           <div className="row spread">
             <h3>Задача № {t.ordinal}</h3>
-            <span className={'status ' + (t.correct ? 'correct' : 'wrong')}>
+            <span
+              className={
+                'status ' + (t.correct === null ? 'unsolved' : t.correct ? 'correct' : 'wrong')
+              }
+            >
               {t.correct ? <CircleCheck size={15} /> : <CircleMinus size={15} />}{' '}
-              {t.correct ? 'Верно' : 'Неверно'}
+              {t.correct === null ? 'Не решено' : t.correct ? 'Верно' : 'Неверно'}
             </span>
           </div>
           <ReportPhoto
@@ -238,7 +276,7 @@ export function Report({
           <dl className="answer-grid">
             <div>
               <dt>Ответ ученика</dt>
-              <dd>{t.answer}</dd>
+              <dd>{t.answer ?? '—'}</dd>
             </div>
             <div>
               <dt>Правильный ответ</dt>
@@ -246,7 +284,7 @@ export function Report({
             </div>
             <div>
               <dt>Время решения</dt>
-              <dd>{duration(t.durationMs)}</dd>
+              <dd>{t.durationMs === null ? '—' : duration(t.durationMs)}</dd>
             </div>
           </dl>
           {t.solutionPhoto && (

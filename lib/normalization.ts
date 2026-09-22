@@ -15,27 +15,40 @@ export function normalizeAnswer(raw: string): string {
 }
 export function summarize(
   rows: {
-    durationMs: number;
+    durationMs: number | null;
     ordinal: number;
-    correct: boolean;
+    correct: boolean | null;
   }[],
   _legacyTotalMs?: number,
+  unfinishedMs = 0,
 ) {
-  const totalMs = rows.reduce((sum, row) => sum + row.durationMs, 0);
-  const min = Math.min(...rows.map((r) => r.durationMs));
-  const max = Math.max(...rows.map((r) => r.durationMs));
+  const submitted = rows.filter(
+    (r): r is { durationMs: number; ordinal: number; correct: boolean } =>
+      r.durationMs !== null && r.correct !== null,
+  );
+  const submittedMs = submitted.reduce((sum, row) => sum + row.durationMs, 0);
+  const totalMs = submittedMs + unfinishedMs;
+  const min = Math.min(...submitted.map((r) => r.durationMs));
+  const max = Math.max(...submitted.map((r) => r.durationMs));
   return {
     totalMs,
-    averageMs: totalMs / rows.length,
+    averageMs: submitted.length ? submittedMs / submitted.length : null,
+    submitted: submitted.length,
+    wrong: submitted.filter((r) => !r.correct).length,
+    unsolved: rows.length - submitted.length,
     correct: rows.filter((r) => r.correct).length,
     count: rows.length,
-    fastest: {
-      ordinals: rows.filter((r) => r.durationMs === min).map((r) => r.ordinal),
-      durationMs: min,
-    },
-    slowest: {
-      ordinals: rows.filter((r) => r.durationMs === max).map((r) => r.ordinal),
-      durationMs: max,
-    },
+    fastest: submitted.length
+      ? {
+          ordinals: submitted.filter((r) => r.durationMs === min).map((r) => r.ordinal),
+          durationMs: min,
+        }
+      : null,
+    slowest: submitted.length
+      ? {
+          ordinals: submitted.filter((r) => r.durationMs === max).map((r) => r.ordinal),
+          durationMs: max,
+        }
+      : null,
   };
 }

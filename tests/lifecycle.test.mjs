@@ -25,7 +25,22 @@ let now = Date.now();
 const realNow = Date.now;
 Date.now = () => now;
 const conn = new DatabaseSync(':memory:');
-conn.exec('PRAGMA foreign_keys=ON;' + initial + migration + recoveryMigration);
+const completionMigration = await readFile(
+  new URL('../drizzle/0003_attempt_completion.sql', import.meta.url),
+  'utf8',
+);
+const backfillMigration = await readFile(
+  new URL('../drizzle/0004_completion_backfill.sql', import.meta.url),
+  'utf8',
+);
+conn.exec(
+  'PRAGMA foreign_keys=ON;' +
+    initial +
+    migration +
+    recoveryMigration +
+    completionMigration +
+    backfillMigration,
+);
 class Statement {
   constructor(query) {
     this.query = query;
@@ -50,16 +65,21 @@ let failDelete = false,
   solutionPutHook = null,
   solutionPutFailure = null,
   answerBatchFailure = null,
+  finishBatchFailure = null,
   solutionPuts = 0;
 globalThis.__taskbattleTestEnv = {
   DB: {
     prepare: (q) => new Statement(q),
     async batch(statements) {
       // D1 batches are atomic: do not yield between statements in this SQLite mock.
-      const fault = statements[0]?.query.includes('INSERT INTO answers(')
-        ? answerBatchFailure
-        : null;
+      const isFinish = statements[0]?.query.includes("finish_reason='manual'");
+      const fault = isFinish
+        ? finishBatchFailure
+        : statements[0]?.query.includes('INSERT INTO answers(')
+          ? answerBatchFailure
+          : null;
       if (fault) answerBatchFailure = null;
+      if (isFinish) finishBatchFailure = null;
       conn.exec('BEGIN');
       let out;
       try {
@@ -319,6 +339,9 @@ test('25 tasks, independent attempts, delays, photos, retries, expiry and cleanu
     .prepare('UPDATE attempts SET finished_at=?,result_expires_at=NULL,position=25 WHERE id=?')
     .run(now, b.attemptId);
   const bExpiry = now + 259200000;
+  // Model an attempt started near the end of a room's 14-day life.
+  room.expiresAt = a.finishedAt + 7200000;
+  conn.prepare('UPDATE rooms SET expires_at=? WHERE id=?').run(room.expiresAt, room.roomId);
   now = room.expiresAt + 1;
   assert.equal((await call('/rooms/' + room.roomId)).status, 410);
   assert.equal((await call('/attempts/' + a.attemptId, { secret: a.key })).status, 200);
@@ -372,12 +395,14 @@ async function recoveryFixture(t) {
   solutionPutHook = null;
   solutionPutFailure = null;
   answerBatchFailure = null;
+  finishBatchFailure = null;
   failDelete = false;
   t.after(() => {
     Date.now = realNow;
     solutionPutHook = null;
     solutionPutFailure = null;
     answerBatchFailure = null;
+    finishBatchFailure = null;
     failDelete = false;
   });
   const room = await create(1);
@@ -406,6 +431,10 @@ const solutionKeys = (a) =>
   [...objects.keys()].filter((k) => k.startsWith(`solutions/${a.attemptId}/`));
 const solutionJournal = (a) =>
   conn.prepare('SELECT * FROM blobs WHERE key LIKE ?').all(`solutions/${a.attemptId}/%`);
+const finish = (
+  a,
+  data = { requestId: crypto.randomUUID(), position: a.position, durationMs: 0 },
+) => call(`/attempts/${a.attemptId}/finish`, { method: 'POST', secret: a.key, body: data });
 function uploadGate(required = 1) {
   const entered = Promise.withResolvers(),
     release = Promise.withResolvers();
@@ -639,4 +668,311 @@ test('legacy attempt order stays immutable while new attempts use teacher ordina
     legacy,
   );
   assert.equal(answerRows(active)[0].task_id, legacy[0]);
+});
+
+async function partialFixture(t, count = 3) {
+  await recoveryFixture(t);
+  const room = await create(count);
+  const a = await ready(await start(room));
+  return { room, a };
+}
+test('manual zero-answer result, immutable double finish and no invented intervals', async (t) => {
+  const { a } = await partialFixture(t);
+  now += 3456;
+  const intent = { requestId: crypto.randomUUID(), position: 0, durationMs: 3456 };
+  const [one, two] = await Promise.all([finish(a, intent), finish(a, intent)]);
+  assert.equal(one.status, 200, JSON.stringify(one.data));
+  assert.equal(two.data.finishedAt, one.data.finishedAt);
+  assert.equal(one.data.summary.totalMs, 3456);
+  assert.equal(one.data.summary.averageMs, null);
+  assert.equal(one.data.summary.fastest, null);
+  assert.equal(one.data.summary.slowest, null);
+  assert.equal(one.data.summary.unsolved, 3);
+  assert.equal(one.data.summary.wrong, 0);
+  assert.equal(one.data.finishReason, 'manual');
+  assert.ok(
+    one.data.report.every(
+      (r) => r.answer === null && r.correct === null && r.correctAnswer === '5',
+    ),
+  );
+  now += 90000;
+  const retry = await finish(a, intent);
+  assert.equal(retry.data.finishedAt, one.data.finishedAt);
+  assert.equal(retry.data.resultExpiresAt, one.data.resultExpiresAt);
+  assert.equal(retry.data.summary.totalMs, 3456);
+  assert.equal(answerRows(a).length, 0);
+});
+test('partial report preserves accepted photo, wrong/unsolved distinction, ties and teacher report', async (t) => {
+  const { room, a: first } = await partialFixture(t, 4);
+  let a = first;
+  for (let i = 0; i < 2; i++) {
+    now += 5000;
+    const payload = {
+      requestId: crypto.randomUUID(),
+      position: a.position,
+      taskId: a.tasks[a.position].id,
+      answer: i ? '99' : '5',
+      durationMs: 5000,
+      readyId: a.readyId,
+    };
+    const out = await submit(
+      a,
+      payload,
+      i ? undefined : new File([png], 'solution.png', { type: 'image/png' }),
+    );
+    assert.equal(out.status, 200, JSON.stringify(out.data));
+    a = await ready({ ...out.data, key: a.key });
+  }
+  now += 1234;
+  const out = await finish(a, { requestId: crypto.randomUUID(), position: 2, durationMs: 1234 });
+  const s = out.data.summary;
+  assert.equal(s.totalMs, 11234);
+  assert.equal(s.averageMs, 5000);
+  assert.equal(s.correct, 1);
+  assert.equal(s.wrong, 1);
+  assert.equal(s.unsolved, 2);
+  assert.equal(s.submitted, 2);
+  assert.deepEqual(s.fastest.ordinals, [1, 2]);
+  assert.deepEqual(s.slowest.ordinals, [1, 2]);
+  assert.equal(solutionKeys(a).length, 1);
+  assert.equal(
+    (
+      await call(out.data.report[0].solutionPhoto.slice(4), {
+        secret: room.teacherKey,
+        teacher: true,
+      })
+    ).status,
+    200,
+  );
+  const teacher = await call('/attempts/' + a.attemptId + '/report', {
+    secret: room.teacherKey,
+    teacher: true,
+  });
+  assert.equal(teacher.data.finishReason, 'manual');
+  assert.deepEqual(teacher.data.summary, s);
+});
+test('finish wins during R2 upload: late attachment is removed, answer never added', async (t) => {
+  const { a, payload, file } = await recoveryFixture(t);
+  const gate = uploadGate();
+  const sending = submit(a, payload, file);
+  await gate.entered;
+  const out = await finish(a, { requestId: crypto.randomUUID(), position: 0, durationMs: 5000 });
+  // Cleanup deleted the bytes but has not removed the journal yet when PUT finishes.
+  conn
+    .prepare("UPDATE blobs SET state='deleting' WHERE key LIKE ?")
+    .run(`solutions/${a.attemptId}/%`);
+  gate.release();
+  const late = await sending;
+  assert.equal(out.data.finishReason, 'manual');
+  assert.equal(late.data.finishReason, 'manual');
+  assert.equal(answerRows(a).length, 0);
+  assert.equal(solutionKeys(a).length, 0);
+  assert.equal(solutionJournal(a).length, 0);
+});
+test('answer wins then finish from old position: accepted time counted exactly once', async (t) => {
+  const { a } = await partialFixture(t);
+  now += 5000;
+  const payload = {
+    requestId: crypto.randomUUID(),
+    position: 0,
+    taskId: a.tasks[0].id,
+    answer: '5',
+    durationMs: 5000,
+    readyId: a.readyId,
+  };
+  const saved = await submit(a, payload, new File([png], 'solution.png', { type: 'image/png' }));
+  assert.equal(saved.data.position, 1);
+  const out = await finish(a, { requestId: crypto.randomUUID(), position: 0, durationMs: 5000 });
+  assert.equal(out.data.summary.totalMs, 5000);
+  assert.equal(out.data.unfinishedMs, 0);
+  assert.equal(out.data.summary.submitted, 1);
+  assert.equal(solutionKeys(a).length, 1);
+});
+test('last answer terminal result cannot be overwritten by manual finish', async (t) => {
+  const { a, payload, file } = await recoveryFixture(t);
+  const saved = await submit(a, payload, file);
+  const out = await finish(a, { requestId: crypto.randomUUID(), position: 0, durationMs: 9000 });
+  assert.equal(out.data.finishReason, 'completed');
+  assert.equal(out.data.finishedAt, saved.data.finishedAt);
+  assert.equal(out.data.summary.totalMs, 5000);
+});
+test('calendar deadline immutable across ready, late answer refused, timeout keeps exact deadline and 72h', async (t) => {
+  const { a, payload, file } = await recoveryFixture(t);
+  const deadline = a.startedAt + 86400000;
+  assert.equal(a.deadlineAt, deadline);
+  const savedStart = conn
+    .prepare('SELECT started_at FROM attempts WHERE id=?')
+    .get(a.attemptId).started_at;
+  assert.equal(savedStart, a.startedAt);
+  now = deadline + 7200000;
+  const late = await submit(a, payload, file);
+  assert.equal(late.status, 409);
+  assert.equal(answerRows(a).length, 0);
+  assert.equal(solutionKeys(a).length, 0);
+  const out = await call('/attempts/' + a.attemptId, { secret: a.key });
+  assert.equal(out.data.finishedAt, deadline);
+  assert.equal(out.data.resultExpiresAt, deadline + 259200000);
+  assert.equal(out.data.finishReason, 'timeout');
+  assert.equal(out.data.timingIncomplete, true);
+  assert.equal(out.data.summary.totalMs, 0);
+  const manual = await finish(a);
+  assert.equal(manual.data.finishReason, 'timeout');
+  now = deadline + 259200000;
+  assert.equal((await call('/attempts/' + a.attemptId, { secret: a.key })).status, 410);
+});
+test('14-day room closes to new starts while existing attempt/photos continue; result has own 72h', async (t) => {
+  const { room } = await partialFixture(t);
+  const r = (await call('/rooms/' + room.roomId)).data;
+  assert.equal(r.expiresAt - r.createdAt, 1209600000);
+  now = r.expiresAt - 1000;
+  let a = await ready(await start(room));
+  now += 2000;
+  assert.equal((await call('/rooms/' + room.roomId)).status, 410);
+  const denied = await call('/rooms/' + room.roomId + '/start', {
+    method: 'POST',
+    body: { attemptId: crypto.randomUUID(), attemptKey: key() },
+  });
+  assert.equal(denied.status, 410);
+  assert.equal((await call(a.tasks[0].photo.slice(4), { secret: a.key })).status, 200);
+  const payload = {
+    requestId: crypto.randomUUID(),
+    position: 0,
+    taskId: a.tasks[0].id,
+    answer: '5',
+    durationMs: 2000,
+    readyId: a.readyId,
+  };
+  const out = await submit(a, payload, new File([png], 'solution.png', { type: 'image/png' }));
+  assert.equal(out.status, 200);
+  a = { ...out.data, key: a.key };
+  const report = await finish(a);
+  assert.equal(report.data.resultExpiresAt, now + 259200000);
+  await cleanup();
+  assert.equal(
+    (await call(report.data.report[0].solutionPhoto.slice(4), { secret: a.key })).status,
+    200,
+  );
+  now = report.data.resultExpiresAt;
+  await cleanup();
+  assert.equal(solutionKeys(a).length, 0);
+});
+test('closed-tab scheduled completion is bounded; backlog keeps shared photos; delayed job uses deadline', async (t) => {
+  const { room, a } = await partialFixture(t);
+  const row = conn.prepare('SELECT * FROM attempts WHERE id=?').get(a.attemptId);
+  // Isolate a 501-row queue without involving rate-limit bypass in the API.
+  conn
+    .prepare(
+      'UPDATE attempts SET finished_at=?,result_expires_at=? WHERE id<>? AND finished_at IS NULL',
+    )
+    .run(now, now + 259200000, a.attemptId);
+  for (let i = 0; i < 500; i++)
+    conn
+      .prepare(
+        'INSERT INTO attempts(id,room_id,secret_hash,order_json,started_at,task_started_at,deadline_at,timing_version) VALUES(?,?,?,?,?,?,?,2)',
+      )
+      .run(
+        crypto.randomUUID(),
+        room.roomId,
+        row.secret_hash,
+        row.order_json,
+        row.started_at,
+        0,
+        row.deadline_at,
+      );
+  now = row.deadline_at + 10000;
+  conn.prepare('UPDATE rooms SET expires_at=1 WHERE id=?').run(room.roomId);
+  conn
+    .prepare(
+      'UPDATE blobs SET expires_at=1 WHERE key IN(SELECT file_key FROM tasks WHERE room_id=?)',
+    )
+    .run(room.roomId);
+  const out = await cleanup();
+  assert.equal(out.finalized, 500);
+  assert.equal(
+    conn
+      .prepare('SELECT count(*) n FROM attempts WHERE room_id=? AND finished_at IS NULL')
+      .get(room.roomId).n,
+    1,
+  );
+  for (const t of conn.prepare('SELECT file_key FROM tasks WHERE room_id=?').all(room.roomId))
+    assert.ok(objects.has(t.file_key));
+  await cleanup();
+  const final = conn.prepare('SELECT * FROM attempts WHERE id=?').get(a.attemptId);
+  assert.equal(final.finished_at, row.deadline_at);
+  assert.equal(final.result_expires_at, row.deadline_at + 259200000);
+});
+test('data backfill extends live rooms only and preserves answers/files and completed expiry', () => {
+  const old = new DatabaseSync(':memory:');
+  old.exec(initial + migration + recoveryMigration + completionMigration);
+  const time = realNow();
+  for (const [id, expiry] of [
+    ['live', time + 3600000],
+    ['expired', time - 60000],
+  ])
+    old
+      .prepare('INSERT INTO rooms VALUES(?,?,?,?,?,?,?)')
+      .run(id, id, 'title', 'hash', time - 1000, expiry, 1);
+  old.exec(
+    "INSERT INTO attempts(id,room_id,secret_hash,order_json,started_at,task_started_at,finished_at,result_expires_at) VALUES('a','live','hash','[]',1234,1234,5678,259205678)",
+  );
+  old.exec(backfillMigration);
+  assert.equal(
+    old.prepare("SELECT expires_at FROM rooms WHERE id='live'").get().expires_at,
+    time - 1000 + 1209600000,
+  );
+  assert.equal(
+    old.prepare("SELECT expires_at FROM rooms WHERE id='expired'").get().expires_at,
+    time - 60000,
+  );
+  assert.equal(old.prepare('SELECT deadline_at FROM attempts').get().deadline_at, 1234 + 86400000);
+  assert.equal(
+    old.prepare('SELECT result_expires_at FROM attempts').get().result_expires_at,
+    259205678,
+  );
+  old.close();
+});
+test('manual commit rollback and lost acknowledgement both recover idempotently', async (t) => {
+  const { a } = await partialFixture(t);
+  now += 2000;
+  const intent = { requestId: crypto.randomUUID(), position: 0, durationMs: 2000 };
+  finishBatchFailure = 'rollback';
+  assert.equal((await finish(a, intent)).status, 503);
+  assert.equal(
+    conn.prepare('SELECT finished_at FROM attempts WHERE id=?').get(a.attemptId).finished_at,
+    null,
+  );
+  finishBatchFailure = 'committed';
+  assert.equal((await finish(a, intent)).status, 503);
+  const committed = conn.prepare('SELECT * FROM attempts WHERE id=?').get(a.attemptId);
+  now += 60000;
+  const retry = await finish(a, intent);
+  assert.equal(retry.status, 200);
+  assert.equal(retry.data.finishedAt, committed.finished_at);
+  assert.equal(retry.data.resultExpiresAt, committed.result_expires_at);
+  assert.equal(retry.data.summary.totalMs, 2000);
+});
+test('photo upload crossing deadline cannot attach to timeout report or leak an orphan', async (t) => {
+  const { a, payload, file } = await recoveryFixture(t);
+  const gate = uploadGate(),
+    sending = submit(a, payload, file);
+  await gate.entered;
+  now = a.deadlineAt + 1;
+  gate.release();
+  const out = await sending;
+  assert.equal(out.data.finishReason, 'timeout');
+  assert.equal(out.data.finishedAt, a.deadlineAt);
+  assert.equal(answerRows(a).length, 0);
+  assert.equal(solutionKeys(a).length, 0);
+});
+test('legacy row inserted during rollout receives a deadline on access and scheduled processing', async (t) => {
+  const { a } = await partialFixture(t);
+  conn.prepare('UPDATE attempts SET deadline_at=NULL WHERE id=?').run(a.attemptId);
+  const accessed = await call('/attempts/' + a.attemptId, { secret: a.key });
+  assert.equal(accessed.data.deadlineAt, a.startedAt + 86400000);
+  conn.prepare('UPDATE attempts SET deadline_at=NULL WHERE id=?').run(a.attemptId);
+  now = a.startedAt + 86400000 + 1;
+  await cleanup();
+  const row = conn.prepare('SELECT * FROM attempts WHERE id=?').get(a.attemptId);
+  assert.equal(row.finished_at, a.startedAt + 86400000);
+  assert.equal(row.finish_reason, 'timeout');
 });

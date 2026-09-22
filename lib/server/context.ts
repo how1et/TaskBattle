@@ -19,6 +19,11 @@ export type Attempt = {
   timing_version: number;
   ready_id: string | null;
   result_expires_at: number | null;
+  deadline_at: number;
+  finish_reason: 'completed' | 'manual' | 'timeout' | null;
+  finish_request_id: string | null;
+  unfinished_ms: number;
+  timing_incomplete: number;
 };
 export type Task = {
   id: string;

@@ -20,13 +20,15 @@ export type RoomData = {
     finishedAt: number | null;
     position: number;
     resultExpiresAt?: number | null;
+    finishReason?: string | null;
   }[];
 };
 export type ReportRow = Photo & {
-  answer: string;
+  answer: string | null;
   correctAnswer: string;
-  correct: boolean;
-  durationMs: number;
+  correct: boolean | null;
+  durationMs: number | null;
+  submitted: boolean;
   solutionPhoto?: string | null;
 };
 export type AttemptData = RoomData & {
@@ -39,20 +41,27 @@ export type AttemptData = RoomData & {
   completedMs: number;
   resultExpiresAt: number | null;
   finishedAt: number | null;
+  deadlineAt: number;
+  finishReason: 'completed' | 'manual' | 'timeout' | null;
+  timingIncomplete: boolean;
+  unfinishedMs: number;
   report?: ReportRow[];
   summary?: {
     totalMs: number;
-    averageMs: number;
+    averageMs: number | null;
+    submitted: number;
+    wrong: number;
+    unsolved: number;
     correct: number;
     count: number;
     fastest: {
       ordinals: number[];
       durationMs: number;
-    };
+    } | null;
     slowest: {
       ordinals: number[];
       durationMs: number;
-    };
+    } | null;
   };
 };
 export class ApiError extends Error {

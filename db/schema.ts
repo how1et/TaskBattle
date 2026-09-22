@@ -42,10 +42,16 @@ export const attempts = sqliteTable(
     timingVersion: integer('timing_version').notNull().default(1),
     readyId: text('ready_id'),
     resultExpiresAt: integer('result_expires_at'),
+    deadlineAt: integer('deadline_at'),
+    finishReason: text('finish_reason'),
+    finishRequestId: text('finish_request_id'),
+    unfinishedMs: integer('unfinished_ms').notNull().default(0),
+    timingIncomplete: integer('timing_incomplete').notNull().default(0),
   },
   (t) => [
     index('attempts_room_start').on(t.roomId, t.startedAt),
     index('attempts_result_expiry').on(t.resultExpiresAt),
+    index('attempts_active_deadline').on(t.finishedAt, t.deadlineAt),
   ],
 );
 export const answers = sqliteTable(

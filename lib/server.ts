@@ -3,12 +3,14 @@ import {
   assertAccessTime,
   attempt,
   cancelAnswer,
+  finish,
   ready,
   snapshot,
   start,
   submit,
 } from './server/attempts';
 import { cleanup } from './server/cleanup';
+import { finalizeDue } from './server/completion';
 import {
   fail,
   hash,
@@ -74,13 +76,12 @@ export async function handle(req: Request) {
       else if (p[2] === 'start' && method === 'POST') result = await start(req, r, ip);
       else if (p[2] === 'teacher' && method === 'GET') {
         await secret(req, r.teacher_hash, 'x-teacher-key');
+        await finalizeDue(r.id, LIMITS.attempts);
         const list = (
           await sql(
-            'SELECT id,started_at,finished_at,position,COALESCE(result_expires_at,finished_at+?) AS result_expires_at FROM attempts WHERE room_id=? AND ((finished_at IS NULL AND ?>?) OR COALESCE(result_expires_at,finished_at+?)>?) ORDER BY started_at,id',
+            'SELECT id,started_at,deadline_at,finish_reason,finished_at,position,COALESCE(result_expires_at,finished_at+?) AS result_expires_at FROM attempts WHERE room_id=? AND (finished_at IS NULL OR COALESCE(result_expires_at,finished_at+?)>?) ORDER BY started_at,id',
             LIMITS.resultTtlMs,
             r.id,
-            r.expires_at,
-            Date.now(),
             LIMITS.resultTtlMs,
             Date.now(),
           ).all<{
@@ -88,6 +89,8 @@ export async function handle(req: Request) {
             started_at: number;
             finished_at: number | null;
             position: number;
+            deadline_at: number;
+            finish_reason: string | null;
             result_expires_at: number | null;
           }>()
         ).results;
@@ -96,13 +99,17 @@ export async function handle(req: Request) {
           ...roomPublic(r, []),
           roomExpiresAt: r.expires_at,
           roomClosed: r.expires_at <= Date.now(),
-          expiresAt: Math.max(r.expires_at, ...list.map((a) => a.result_expires_at || 0)),
+          expiresAt: Math.max(
+            r.expires_at,
+            ...list.map((a) => a.result_expires_at || a.deadline_at + LIMITS.resultTtlMs),
+          ),
           attempts: list.map((a, i) => ({
             id: a.id,
             number: i + 1,
             startedAt: a.started_at,
             finishedAt: a.finished_at,
             position: a.position,
+            finishReason: a.finish_reason,
             resultExpiresAt: a.result_expires_at,
           })),
         };
@@ -151,6 +158,7 @@ export async function handle(req: Request) {
         result = await cancelAnswer(req, a, r);
       else if (p[2] === 'answers' && method === 'POST' && !teacher)
         result = await submit(req, a, r, trace);
+      else if (p[2] === 'finish' && method === 'POST' && !teacher) result = await finish(req, a, r);
       else fail(404, 'Страница не найдена.');
     } else fail(404, 'Страница не найдена.');
     return Response.json(result, { headers });

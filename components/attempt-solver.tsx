@@ -9,6 +9,16 @@ import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Progress } from './ui/progress';
 import { Skeleton } from './ui/skeleton';
+import {
+  AlertDialog,
+  AlertDialogTrigger,
+  AlertDialogContent,
+  AlertDialogTitle,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogCancel,
+  AlertDialogAction,
+} from './ui/alert-dialog';
 import { useSolver } from './use-solver';
 export function AttemptSolver({
   a,
@@ -28,7 +38,7 @@ export function AttemptSolver({
   const input = useRef<HTMLInputElement>(null),
     gallery = useRef<HTMLInputElement>(null);
   const solver = useSolver(a, secret, !!photos[a.tasks[a.position]?.id], accept, onError);
-  const busy = solver.busy,
+  const busy = solver.busy || solver.finishPending,
     answer = solver.answer,
     pending = solver.pending;
   useEffect(() => {
@@ -154,18 +164,29 @@ export function AttemptSolver({
           <div className="error" role="alert">
             <p>{solver.error}</p>
             <div className="row recovery-actions">
-              {pending && (
+              {solver.finishPending ? (
                 <Button
                   type="button"
-                  variant="outline"
                   className="secondary"
-                  disabled={busy}
-                  onClick={() => void solver.edit()}
+                  disabled={solver.finishing}
+                  onClick={() => void solver.finish()}
                 >
-                  Изменить ответ
+                  Повторить
                 </Button>
+              ) : (
+                pending && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="secondary"
+                    disabled={busy}
+                    onClick={() => void solver.edit()}
+                  >
+                    Изменить ответ
+                  </Button>
+                )
               )}
-              {(solver.preview || solver.missingPhoto) && (
+              {!solver.finishPending && (solver.preview || solver.missingPhoto) && (
                 <>
                   <Button
                     type="button"
@@ -220,18 +241,66 @@ export function AttemptSolver({
               busy || solver.photoBusy || solver.preparing || !answer.trim() || !photos[task.id]
             }
           >
-            {busy
-              ? solver.recovering
-                ? 'Проверяем ответ…'
-                : solver.preview
-                  ? 'Загружаем фото…'
-                  : 'Сохраняем ответ…'
-              : pending
-                ? 'Повторить отправку'
-                : 'Ответить'}
+            {solver.finishPending
+              ? 'Завершаем тест…'
+              : busy
+                ? solver.recovering
+                  ? 'Проверяем ответ…'
+                  : solver.preview
+                    ? 'Загружаем фото…'
+                    : 'Сохраняем ответ…'
+                : pending
+                  ? 'Повторить отправку'
+                  : 'Ответить'}
             <ArrowRight size={19} />
           </Button>
         </form>
+        <div className="finish-area">
+          {solver.finishPending ? (
+            <p role="status">
+              {solver.finishing
+                ? 'Сохраняем итог… Таймер остановлен.'
+                : 'Время зафиксировано. Повторите завершение, когда появится связь.'}
+            </p>
+          ) : (
+            <AlertDialog>
+              <AlertDialogTrigger asChild>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="secondary"
+                  disabled={solver.restoring}
+                >
+                  Закончить тест
+                </Button>
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogTitle>Закончить тест?</AlertDialogTitle>
+                <AlertDialogDescription>
+                  Отправлено ответов: {a.position} из {a.count}. Оставшиеся задачи будут отмечены
+                  как нерешённые.
+                </AlertDialogDescription>
+                {(answer.trim() || solver.preview || solver.photoBusy || solver.missingPhoto) && (
+                  <p className="notice">
+                    Неотправленный ответ и выбранное фото не войдут в результат. Чтобы отправить их,
+                    нажмите «Продолжить решать».
+                  </p>
+                )}
+                {solver.busy && (
+                  <p className="small muted">
+                    Отправка уже началась. Если ответ принят, он сохранится в отчёте.
+                  </p>
+                )}
+                <AlertDialogFooter>
+                  <AlertDialogCancel className="secondary">Продолжить решать</AlertDialogCancel>
+                  <AlertDialogAction className="primary" onClick={() => void solver.finish()}>
+                    Закончить тест
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
+          )}
+        </div>
         {common}
       </div>
     </>

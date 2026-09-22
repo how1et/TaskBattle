@@ -59,6 +59,7 @@ export function useSolver(
           taskId: d.payload!.taskId,
         }),
       send: (v, d) => sendAnswer(v.attemptId, key, d),
+      finish: (v, intent) => api(`/attempts/${v.attemptId}/finish`, key, false, intent),
       accept: (out) => callbacks.current.accept(out),
       fatal: (e) => callbacks.current.onError(e),
       changed: (s) => setState(s),
@@ -80,6 +81,24 @@ export function useSolver(
         clockOffset: a.clockOffset ?? machine.current.server.clockOffset,
       };
   }, [a]);
+  useEffect(() => {
+    if (!a || a.finishedAt !== null) return;
+    const check = () => {
+      if (Date.now() + (a.clockOffset || 0) >= a.deadlineAt) void machine.current?.finish(true);
+    };
+    const timer = setTimeout(check, Math.max(0, a.deadlineAt - a.serverNow) + 50);
+    document.addEventListener('visibilitychange', check);
+    window.addEventListener('pageshow', check);
+    window.addEventListener('online', check);
+    return () => {
+      clearTimeout(timer);
+      document.removeEventListener('visibilitychange', check);
+      window.removeEventListener('pageshow', check);
+      window.removeEventListener('online', check);
+    };
+    // Re-arm on an authoritative snapshot, including an early clock correction.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [a?.attemptId, a?.deadlineAt, a?.finishedAt, a?.clockOffset, a?.serverNow]);
   useEffect(() => {
     if (!photoReady || draftId !== id || !['preparing', 'editing'].includes(state.phase)) return;
     let second = 0;
@@ -106,9 +125,12 @@ export function useSolver(
   return {
     readTime,
     answer: state.draft?.id === id ? state.draft.answer : '',
+    restoring: state.phase === 'loading',
     preview,
     pending: !!state.draft?.payload,
     busy: state.phase === 'sending' || state.phase === 'recovering',
+    finishPending: state.phase === 'finishing' || state.phase === 'finish-failed',
+    finishing: state.phase === 'finishing',
     recovering: state.phase === 'recovering',
     photoBusy: state.photoBusy,
     preparing: state.draft?.id !== id || !state.draft?.activation,
@@ -120,5 +142,6 @@ export function useSolver(
     submit: () => machine.current?.submit(),
     edit: () => machine.current?.edit(),
     withoutPhoto: () => machine.current?.withoutPhoto(),
+    finish: () => machine.current?.finish(),
   };
 }
