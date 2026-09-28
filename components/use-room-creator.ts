@@ -9,10 +9,12 @@ type Draft = {
   file: File;
   url: string;
   answer: string;
+  topic: string;
   id: string;
 };
 export function useRoomCreator() {
   const [title, setTitle] = useState('');
+  const [amcYear, setAmcYear] = useState('');
   const [tasks, setTasks] = useState<Draft[]>([]);
   const [error, setError] = useState('');
   const [sending, setBusy] = useState(false);
@@ -128,7 +130,7 @@ export function useRoomCreator() {
       const added = prepared.map((file) => {
         const url = URL.createObjectURL(file);
         urls.current.add(url);
-        return { file, url, answer: '', id: crypto.randomUUID() };
+        return { file, url, answer: '', topic: '', id: crypto.randomUUID() };
       });
       resetCreation();
       setTasks((old) => [...old, ...added]);
@@ -168,6 +170,8 @@ export function useRoomCreator() {
       data.set('requestId', creation.current.id);
       data.set('teacherKey', creation.current.key);
       data.set('title', title);
+      data.set('amcYear', amcYear);
+      data.set('topics', JSON.stringify(tasks.map((t) => t.topic)));
       data.set('answers', JSON.stringify(tasks.map((t) => t.answer)));
       tasks.forEach((t) => data.append('photos', t.file));
       const out = await uploadRoom(data, setProgress);
@@ -188,6 +192,8 @@ export function useRoomCreator() {
   return {
     title,
     setTitle,
+    amcYear,
+    setAmcYear,
     tasks,
     setTasks,
     error,

@@ -10,6 +10,8 @@ import {
   submit,
 } from './server/attempts';
 import { cleanup } from './server/cleanup';
+import { exportResult } from './server/exports';
+import { openJourney, journeyControl, journeySubmit } from './server/journey';
 import { finalizeDue } from './server/completion';
 import {
   fail,
@@ -151,7 +153,18 @@ export async function handle(req: Request) {
         return new Response(object!.body, {
           headers: { ...headers, 'Content-Type': file!.mime, 'Content-Disposition': 'inline' },
         });
-      } else if (method === 'GET' && (p.length === 2 || (p[2] === 'report' && p.length === 3)))
+      } else if (p[2] === 'export' && method === 'POST') {
+        if (!teacher) fail(403, 'Сохранение результатов доступно только преподавателю.');
+        result = await exportResult(req, a, r);
+      } else if (p[2] === 'journey' && method === 'GET' && !teacher)
+        result = await openJourney(a, r);
+      else if (p[2] === 'journey' && method === 'POST' && !teacher)
+        result = await journeyControl(req, a, r);
+      else if (p[2] === 'journey-answer' && method === 'POST' && !teacher)
+        result = await journeySubmit(req, a, r);
+      else if (a.timing_version === 3 && method === 'POST' && !teacher)
+        fail(409, 'Обновите страницу, чтобы продолжить попытку.');
+      else if (method === 'GET' && (p.length === 2 || (p[2] === 'report' && p.length === 3)))
         result = await snapshot(a, r);
       else if (p[2] === 'ready' && method === 'POST' && !teacher) result = await ready(req, a, r);
       else if (p[2] === 'cancel-answer' && method === 'POST' && !teacher)

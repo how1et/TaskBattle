@@ -2,10 +2,12 @@ export type Photo = {
   id: string;
   ordinal: number;
   photo: string;
+  topic?: string | null;
 };
 export type RoomData = {
   roomId: string;
   title: string;
+  amcYear?: number | null;
   count: number;
   expiresAt: number;
   roomExpiresAt?: number;
@@ -33,6 +35,7 @@ export type ReportRow = Photo & {
 };
 export type AttemptData = RoomData & {
   attemptId: string;
+  journey?: import('./journey-types').JourneyState;
   position: number;
   startedAt: number;
   taskStartedAt: number | null;

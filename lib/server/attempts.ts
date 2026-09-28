@@ -1,3 +1,4 @@
+import { journeySnapshot } from './journey-snapshot';
 import { inspectImage } from '../image-file';
 import { LIMITS } from '../limits';
 import { normalizeAnswer, summarize } from '../normalization';
@@ -90,6 +91,7 @@ export async function attempt(id: string, req: Request, teacher = false) {
 }
 export async function snapshot(a: Attempt, r: Room) {
   await assertAccessTime(a, r);
+  if (a.timing_version === 3) return journeySnapshot(a, r);
   const ts = await roomTasks(r.id),
     ids: string[] = JSON.parse(a.order_json);
   const rows = (
@@ -108,6 +110,7 @@ export async function snapshot(a: Attempt, r: Room) {
     attemptId: a.id,
     roomId: r.id,
     title: r.title,
+    amcYear: r.amc_year,
     roomExpiresAt: r.expires_at,
     expiresAt: a.finished_at !== null ? resultExpiry(a) : a.deadline_at,
     deadlineAt: a.deadline_at,
@@ -135,6 +138,7 @@ export async function snapshot(a: Attempt, r: Room) {
     return {
       id: t.id,
       ordinal: t.ordinal,
+      topic: t.topic,
       photo: `/api/attempts/${a.id}/photos/${t.id}`,
       answer: answer?.answer ?? null,
       submitted: !!answer,
@@ -196,7 +200,7 @@ export async function ready(req: Request, a: Attempt, r: Room) {
   )
     fail(400, 'Не удалось начать задачу. Обновите страницу.');
   await sql(
-    'UPDATE attempts SET ready_id=?,task_started_at=? WHERE id=? AND position=? AND ready_id IS NULL AND finished_at IS NULL AND deadline_at>?',
+    'UPDATE attempts SET ready_id=?,task_started_at=? WHERE id=? AND position=? AND ready_id IS NULL AND finished_at IS NULL AND timing_version<3 AND deadline_at>?',
     data.readyId,
     data.startedAt,
     a.id,
@@ -232,7 +236,9 @@ type AnswerInput = {
   durationMs: number;
   readyId: string;
 };
-async function answerBody(req: Request): Promise<{ data: AnswerInput; file: File | null }> {
+export async function answerBody<T = AnswerInput>(
+  req: Request,
+): Promise<{ data: T; file: File | null }> {
   if (!req.headers.get('content-type')?.startsWith('multipart/form-data'))
     return { data: await body(req), file: null };
   if (Number(req.headers.get('content-length')) > LIMITS.fileBytes + 16384)
@@ -251,7 +257,7 @@ async function answerBody(req: Request): Promise<{ data: AnswerInput; file: File
   const form = await new Response(stream, {
     headers: { 'content-type': req.headers.get('content-type')! },
   }).formData();
-  let data!: AnswerInput;
+  let data!: T;
   try {
     data = JSON.parse(String(form.get('payload')));
     if (!data || typeof data !== 'object') throw Error('Invalid payload');
@@ -408,7 +414,7 @@ export async function submit(req: Request, a: Attempt, r: Room, trace: RequestTr
     await db().batch([
       sql(
         `INSERT INTO answers(id,attempt_id,position,task_id,request_id,answer,correct,started_at,answered_at,duration_ms,ready_id,received_at,solution_key,solution_mime,solution_digest)
-        SELECT ?,id,position,?,?,?,?,task_started_at,?,?,?,?,?,?,? FROM attempts WHERE id=? AND position=? AND finished_at IS NULL AND (timing_version=1 OR ready_id=?) AND deadline_at>? AND (? IS NULL OR EXISTS(SELECT 1 FROM blobs WHERE key=? AND state='live')) AND NOT EXISTS(SELECT 1 FROM cancelled_answers WHERE attempt_id=attempts.id AND request_id=?) ON CONFLICT DO NOTHING`,
+        SELECT ?,id,position,?,?,?,?,task_started_at,?,?,?,?,?,?,? FROM attempts WHERE id=? AND position=? AND finished_at IS NULL AND timing_version<3 AND (timing_version=1 OR ready_id=?) AND deadline_at>? AND (? IS NULL OR EXISTS(SELECT 1 FROM blobs WHERE key=? AND state='live')) AND NOT EXISTS(SELECT 1 FROM cancelled_answers WHERE attempt_id=attempts.id AND request_id=?) ON CONFLICT DO NOTHING`,
         random(),
         data.taskId,
         data.requestId,

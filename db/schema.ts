@@ -9,6 +9,7 @@ export const rooms = sqliteTable(
     createdAt: integer('created_at').notNull(),
     expiresAt: integer('expires_at').notNull(),
     count: integer('count').notNull(),
+    amcYear: integer('amc_year'),
   },
   (t) => [index('rooms_expiry').on(t.expiresAt)],
 );
@@ -23,6 +24,7 @@ export const tasks = sqliteTable(
     fileKey: text('file_key').notNull(),
     mime: text('mime').notNull(),
     answer: text('answer').notNull(),
+    topic: text('topic'),
   },
   (t) => [uniqueIndex('tasks_room_ordinal').on(t.roomId, t.ordinal)],
 );
@@ -47,6 +49,8 @@ export const attempts = sqliteTable(
     finishRequestId: text('finish_request_id'),
     unfinishedMs: integer('unfinished_ms').notNull().default(0),
     timingIncomplete: integer('timing_incomplete').notNull().default(0),
+    stateVersion: integer('state_version').notNull().default(0),
+    selectedTaskId: text('selected_task_id'),
   },
   (t) => [
     index('attempts_room_start').on(t.roomId, t.startedAt),
@@ -76,11 +80,57 @@ export const answers = sqliteTable(
     solutionKey: text('solution_key'),
     solutionMime: text('solution_mime'),
     solutionDigest: text('solution_digest'),
+    revision: integer('revision').notNull().default(1),
   },
   (t) => [
     uniqueIndex('answers_attempt_position').on(t.attemptId, t.position),
     uniqueIndex('answers_attempt_request').on(t.attemptId, t.requestId),
+    uniqueIndex('answers_attempt_task').on(t.attemptId, t.taskId),
   ],
+);
+export const intervals = sqliteTable(
+  'attempt_intervals',
+  {
+    id: text('id').primaryKey(),
+    attemptId: text('attempt_id')
+      .notNull()
+      .references(() => attempts.id, { onDelete: 'cascade' }),
+    taskId: text('task_id')
+      .notNull()
+      .references(() => tasks.id, { onDelete: 'cascade' }),
+    owner: text('owner').notNull(),
+    startedAt: integer('started_at'),
+    durationMs: integer('duration_ms').notNull().default(0),
+    closedAt: integer('closed_at'),
+  },
+  (t) => [index('intervals_attempt_task').on(t.attemptId, t.taskId)],
+);
+export const operations = sqliteTable(
+  'attempt_operations',
+  {
+    attemptId: text('attempt_id')
+      .notNull()
+      .references(() => attempts.id, { onDelete: 'cascade' }),
+    requestId: text('request_id').notNull(),
+    payloadHash: text('payload_hash').notNull(),
+    token: text('token').notNull(),
+  },
+  (t) => [uniqueIndex('operations_attempt_request').on(t.attemptId, t.requestId)],
+);
+export const exports = sqliteTable(
+  'sheet_exports',
+  {
+    attemptId: text('attempt_id')
+      .notNull()
+      .references(() => attempts.id, { onDelete: 'cascade' }),
+    format: text('format').notNull(),
+    documentId: text('document_id').notNull(),
+    sheetId: integer('sheet_id').notNull(),
+    marker: text('marker').notNull(),
+    payload: text('payload').notNull(),
+    completed: integer('completed').notNull().default(0),
+  },
+  (t) => [uniqueIndex('exports_attempt_format').on(t.attemptId, t.format)],
 );
 export const blobs = sqliteTable(
   'blobs',

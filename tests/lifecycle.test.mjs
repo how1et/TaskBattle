@@ -39,7 +39,11 @@ conn.exec(
     migration +
     recoveryMigration +
     completionMigration +
-    backfillMigration,
+    backfillMigration +
+    (await readFile(
+      new URL('../drizzle/0005_navigation_and_exports.sql', import.meta.url),
+      'utf8',
+    )),
 );
 class Statement {
   constructor(query) {
@@ -75,7 +79,8 @@ globalThis.__taskbattleTestEnv = {
       const isFinish = statements[0]?.query.includes("finish_reason='manual'");
       const fault = isFinish
         ? finishBatchFailure
-        : statements[0]?.query.includes('INSERT INTO answers(')
+        : statements[0]?.query.includes('INSERT INTO answers(') ||
+            statements[0]?.query.includes('INSERT OR IGNORE INTO attempt_operations(')
           ? answerBatchFailure
           : null;
       if (fault) answerBatchFailure = null;
@@ -149,6 +154,11 @@ async function create(count = 25) {
   form.set('requestId', crypto.randomUUID());
   form.set('teacherKey', teacherKey);
   form.set('title', '25 испытаний');
+  form.set('amcYear', '2025');
+  form.set(
+    'topics',
+    JSON.stringify(Array.from({ length: count }, (_, i) => (i === 0 ? '=Дроби' : ''))),
+  );
   form.set('answers', JSON.stringify(Array(count).fill('5')));
   for (let i = 0; i < count; i++)
     form.append('photos', new Blob([png], { type: 'image/png' }), 'task.png');
@@ -975,4 +985,377 @@ test('legacy row inserted during rollout receives a deadline on access and sched
   const row = conn.prepare('SELECT * FROM attempts WHERE id=?').get(a.attemptId);
   assert.equal(row.finished_at, a.startedAt + 86400000);
   assert.equal(row.finish_reason, 'timeout');
+});
+
+async function journeyFixture(t, count = 5) {
+  await recoveryFixture(t);
+  const room = await create(count),
+    a = await start(room);
+  const out = await call(`/attempts/${a.attemptId}/journey`, { secret: a.key });
+  assert.equal(out.status, 200, JSON.stringify(out.data));
+  Object.assign(a, out.data);
+  a.owner = crypto.randomUUID();
+  return { a, room };
+}
+async function command(a, body, expected = 200) {
+  const out = await call(`/attempts/${a.attemptId}/journey`, {
+    method: 'POST',
+    secret: a.key,
+    body: { owner: a.owner, ...body },
+  });
+  assert.equal(out.status, expected, JSON.stringify(out.data));
+  if (out.status === 200) Object.assign(a, out.data);
+  return out;
+}
+async function visit(a, n, ms) {
+  const id = crypto.randomUUID();
+  await command(a, { action: 'begin', id, taskId: a.tasks[n - 1].id, version: a.journey.version });
+  await command(a, { action: 'arm', id, startedAt: now });
+  now += ms;
+  await command(a, { action: 'close', id, durationMs: ms });
+  return id;
+}
+function journeyPayload(a, n, answer = '5', photoAction = 'remove') {
+  const taskId = a.tasks[n - 1].id;
+  return {
+    requestId: crypto.randomUUID(),
+    taskId,
+    version: a.journey.version,
+    revision: a.journey.accepted[taskId]?.revision || 0,
+    answer,
+    photoAction,
+  };
+}
+async function journeyAnswer(a, payload, file, expected = 200) {
+  const out = await call(`/attempts/${a.attemptId}/journey-answer`, {
+    method: 'POST',
+    secret: a.key,
+    body: payload,
+    file,
+  });
+  assert.equal(out.status, expected, JSON.stringify(out.data));
+  if (out.status === 200) Object.assign(a, out.data);
+  return out;
+}
+test('journey 1→5→2→5 accumulates disjoint intervals, last ordinal does not finish, revisions replace', async (t) => {
+  const { a, room } = await journeyFixture(t);
+  assert.equal(a.amcYear, 2025);
+  assert.equal(a.tasks[0].topic, '=Дроби');
+  const id = await visit(a, 1, 1100);
+  await command(a, { action: 'close', id, durationMs: 1100 });
+  await visit(a, 5, 2200);
+  await visit(a, 2, 3300);
+  await visit(a, 5, 4400);
+  assert.equal(a.completedMs, 11000);
+  assert.equal(a.journey.times[a.tasks[4].id], 6600);
+  const first = journeyPayload(a, 5, '9');
+  await journeyAnswer(a, first);
+  assert.equal(a.finishedAt, null);
+  assert.equal(a.position, 1);
+  assert.equal(a.report, undefined);
+  assert.equal(JSON.stringify(a).includes('correctAnswer'), false);
+  await visit(a, 5, 500);
+  const revised = journeyPayload(a, 5, '5');
+  await journeyAnswer(a, revised);
+  assert.equal(answerRows(a).length, 1);
+  assert.equal(a.journey.accepted[first.taskId].revision, 2);
+  await journeyAnswer(a, first);
+  assert.equal(a.journey.accepted[first.taskId].answer, '5');
+  await command(a, {
+    action: 'finish',
+    requestId: crypto.randomUUID(),
+    version: a.journey.version,
+  });
+  assert.equal(a.summary.totalMs, 11500);
+  assert.equal(a.summary.submitted, 1);
+  assert.equal(a.summary.correct, 1);
+  assert.equal(a.report[0].durationMs, 1100);
+  assert.equal(a.report[1].durationMs, 3300);
+  const teacher = await call(`/attempts/${a.attemptId}/report`, {
+    secret: room.teacherKey,
+    teacher: true,
+  });
+  assert.equal(teacher.data.summary.totalMs, 11500);
+});
+test('journey photo failures, lost commit acknowledgement, double click and stale revision preserve accepted attachment', async (t) => {
+  const { a } = await journeyFixture(t, 2);
+  await visit(a, 1, 500);
+  const file = new File([png], 'solution.png', { type: 'image/png' }),
+    p = journeyPayload(a, 1, '5', 'replace');
+  solutionPutFailure = 'after';
+  await journeyAnswer(a, p, file, 503);
+  assert.equal(solutionKeys(a).length, 0);
+  answerBatchFailure = 'committed';
+  await journeyAnswer(a, p, file, 503);
+  assert.equal(answerRows(a).length, 1);
+  assert.equal(solutionKeys(a).length, 1);
+  await Promise.all([journeyAnswer(a, p, file), journeyAnswer(a, p, file)]);
+  assert.equal(solutionKeys(a).length, 1);
+  await visit(a, 1, 700);
+  const change = journeyPayload(a, 1, '7', 'keep');
+  await journeyAnswer(a, change);
+  assert.equal(solutionKeys(a).length, 1);
+  await journeyAnswer(a, { ...change, requestId: crypto.randomUUID() }, undefined, 409);
+  await visit(a, 1, 100);
+  await journeyAnswer(a, journeyPayload(a, 1, '5', 'remove'));
+  assert.equal(solutionKeys(a).length, 0);
+  await visit(a, 2, 800);
+  await journeyAnswer(a, journeyPayload(a, 2, '0'));
+  assert.equal(a.finishReason, 'completed');
+  assert.equal(a.summary.totalMs, 2100);
+  assert.equal(a.summary.wrong, 1);
+});
+test('journey tabs arbitrate one visit; checkpoint takeover rejects old close; deadline never counts technical wait', async (t) => {
+  const { a } = await journeyFixture(t, 2),
+    id = crypto.randomUUID();
+  await command(a, { action: 'begin', id, taskId: a.tasks[0].id, version: a.journey.version });
+  await command(a, { action: 'arm', id, startedAt: now });
+  now += 500;
+  await command(a, { action: 'checkpoint', id, durationMs: 500 });
+  const oldOwner = a.owner;
+  a.owner = crypto.randomUUID();
+  await command(
+    a,
+    { action: 'begin', id: crypto.randomUUID(), taskId: a.tasks[1].id, version: a.journey.version },
+    409,
+  );
+  await command(a, { action: 'takeover', version: a.journey.version });
+  await command(a, { action: 'close', owner: oldOwner, id, durationMs: 9000 }, 409);
+  assert.equal(a.completedMs, 500);
+  await visit(a, 2, 1000);
+  const waiting = crypto.randomUUID();
+  await command(a, {
+    action: 'begin',
+    id: waiting,
+    taskId: a.tasks[0].id,
+    version: a.journey.version,
+  });
+  await command(a, { action: 'arm', id: waiting, startedAt: now });
+  now = a.deadlineAt + 60000;
+  await command(a, { action: 'takeover', version: a.journey.version });
+  assert.equal(a.finishReason, 'timeout');
+  assert.equal(a.summary.totalMs, 1500);
+  assert.equal(a.timingIncomplete, true);
+  assert.equal(a.finishedAt, a.deadlineAt);
+});
+test('journey cancellation fences a photo upload and explicit retry without photo succeeds', async (t) => {
+  const { a } = await journeyFixture(t, 2);
+  await visit(a, 1, 800);
+  const p = journeyPayload(a, 1, '5', 'replace'),
+    file = new File([png], 's.png', { type: 'image/png' });
+  const gate = uploadGate();
+  const sending = journeyAnswer(a, p, file, 409);
+  await gate.entered;
+  await command(a, { action: 'cancel', requestId: p.requestId });
+  gate.release();
+  await sending;
+  assert.equal(solutionKeys(a).length, 0);
+  assert.equal(answerRows(a).length, 0);
+  await journeyAnswer(a, journeyPayload(a, 1));
+  assert.equal(a.position, 1);
+});
+
+test('teacher-only Sheets export: atomic batch, lost acknowledgement, no duplicates, numeric times and literal text', async (t) => {
+  const { a, room } = await journeyFixture(t, 5);
+  await visit(a, 1, 1234);
+  await journeyAnswer(a, journeyPayload(a, 1));
+  await visit(a, 5, 2000);
+  await journeyAnswer(a, journeyPayload(a, 5, '9'));
+  await visit(a, 2, 600);
+  await command(a, {
+    action: 'finish',
+    requestId: crypto.randomUUID(),
+    version: a.journey.version,
+  });
+  const exportCall = (format, extra = {}) =>
+    call(`/attempts/${a.attemptId}/export`, {
+      method: 'POST',
+      teacher: true,
+      secret: room.teacherKey,
+      body: { format, ...extra },
+    });
+  assert.equal(
+    (
+      await call(`/attempts/${a.attemptId}/export`, {
+        method: 'POST',
+        secret: a.key,
+        body: { format: 'free' },
+      })
+    ).status,
+    403,
+  );
+  assert.equal((await exportCall('free')).data.code, 'google-setup');
+  const keys = await crypto.subtle.generateKey(
+    {
+      name: 'RSASSA-PKCS1-v1_5',
+      modulusLength: 2048,
+      publicExponent: new Uint8Array([1, 0, 1]),
+      hash: 'SHA-256',
+    },
+    true,
+    ['sign', 'verify'],
+  );
+  const pem =
+    '-----BEGIN PRIVATE KEY-----\n' +
+    Buffer.from(await crypto.subtle.exportKey('pkcs8', keys.privateKey)).toString('base64') +
+    '\n-----END PRIVATE KEY-----';
+  globalThis.__taskbattleTestEnv.GOOGLE_SERVICE_ACCOUNT_JSON = JSON.stringify({
+    client_email: 'test@example.invalid',
+    private_key: pem,
+  });
+  globalThis.__taskbattleTestEnv.GOOGLE_SPREADSHEET_ID = 'synthetic_test_document_12345';
+  const realFetch = globalThis.fetch,
+    sheets = new Map(),
+    batches = [];
+  let drop = true;
+  t.after(() => {
+    globalThis.fetch = realFetch;
+    delete globalThis.__taskbattleTestEnv.GOOGLE_SERVICE_ACCOUNT_JSON;
+    delete globalThis.__taskbattleTestEnv.GOOGLE_SPREADSHEET_ID;
+  });
+  globalThis.fetch = async (url, options = {}) => {
+    if (String(url).startsWith('https://oauth2.googleapis.com/'))
+      return Response.json({ access_token: 'synthetic-test-token', expires_in: 3600 });
+    assert.ok(String(url).startsWith('https://sheets.googleapis.com/'));
+    if (!options.body) return Response.json({ sheets: [...sheets.values()] });
+    const payload = JSON.parse(options.body),
+      id = payload.requests[0].addSheet.properties.sheetId;
+    if (sheets.has(id)) return Response.json({}, { status: 400 });
+    batches.push(payload);
+    const marker = payload.requests.at(-1).createDeveloperMetadata.developerMetadata;
+    sheets.set(id, { properties: { sheetId: id }, developerMetadata: [marker] });
+    if (drop) {
+      drop = false;
+      throw Error('synthetic lost Google acknowledgement');
+    }
+    return Response.json({});
+  };
+  const first = await exportCall('amc8');
+  assert.equal(first.status, 200, JSON.stringify(first.data));
+  const [retry1, retry2] = await Promise.all([exportCall('amc8'), exportCall('amc8')]);
+  assert.equal(retry1.data.url, first.data.url);
+  assert.equal(retry2.data.url, first.data.url);
+  assert.equal(sheets.size, 1);
+  const rows = batches[0].requests[1].updateCells.rows;
+  const header = rows.findIndex((r) => r.values[0]?.userEnteredValue?.stringValue === '№ задачи');
+  assert.equal(rows.length - header - 1, 25);
+  assert.equal(rows[header + 1].values[1].userEnteredValue.stringValue, '=Дроби');
+  assert.equal(rows[header + 1].values[2].userEnteredValue.numberValue, 1.234);
+  assert.equal(rows[header + 2].values[3].userEnteredValue.stringValue, 'Не решено');
+  assert.equal(rows[header + 6].values[3].userEnteredValue.stringValue, 'Нет в подборке');
+  assert.deepEqual(rows[header + 6].values[2], {});
+  assert.equal(JSON.stringify(batches).includes('formulaValue'), false);
+  assert.equal(JSON.stringify(batches).includes(room.teacherKey), false);
+  assert.equal(JSON.stringify(batches).includes('solutionPhoto'), false);
+  const free = await exportCall('free');
+  assert.equal(free.status, 200);
+  assert.equal(sheets.size, 2);
+  const freeRows = batches[1].requests[1].updateCells.rows,
+    fh = freeRows.findIndex((r) => r.values[0]?.userEnteredValue?.stringValue === '№ задачи');
+  assert.equal(freeRows.length - fh - 1, 2);
+  assert.equal(freeRows.at(-1).values[0].userEnteredValue.numberValue, 5);
+  assert.equal(freeRows[8].values[1].userEnteredValue.numberValue, 0.6);
+  now = a.resultExpiresAt + 1;
+  await cleanup();
+  assert.equal(sheets.size, 2);
+});
+test('Sheets templates handle zero answers and missing year without inventing data', async (t) => {
+  const { a } = await journeyFixture(t, 3);
+  await command(a, {
+    action: 'finish',
+    requestId: crypto.randomUUID(),
+    version: a.journey.version,
+  });
+  const { sheetContent } = await loadModule('../lib/sheet-content.ts');
+  const free = sheetContent(a, 'free', null, 123, 'marker');
+  assert.equal(
+    free.requests[1].updateCells.rows.at(-1).values[0].userEnteredValue.stringValue,
+    'Нет отправленных ответов',
+  );
+  const amc = sheetContent(a, 'amc8', 2024, 123, 'marker');
+  const rows = amc.requests[1].updateCells.rows;
+  assert.equal(rows.at(-1).values[3].userEnteredValue.stringValue, 'Нет в подборке');
+  assert.equal(rows[2].values[1].userEnteredValue.numberValue, 2024);
+});
+
+test('all 25 freely ordered answers complete exactly once and AMC8 retains 25 collection ordinals', async (t) => {
+  const { a, room } = await journeyFixture(t, 25);
+  for (const n of [25, ...Array.from({ length: 24 }, (_, i) => i + 1)]) {
+    await visit(a, n, 100 + n);
+    await journeyAnswer(a, journeyPayload(a, n, n % 2 ? '5' : '0'));
+    if (n === 25) assert.equal(a.finishedAt, null);
+  }
+  assert.equal(a.finishReason, 'completed');
+  assert.equal(a.position, 25);
+  assert.equal(a.summary.correct, 13);
+  const { sheetContent } = await loadModule('../lib/sheet-content.ts'),
+    rows = sheetContent(a, 'amc8', 2025, 123, 'marker').requests[1].updateCells.rows;
+  const header = rows.findIndex((r) => r.values[0]?.userEnteredValue?.stringValue === '№ задачи');
+  assert.equal(rows.length - header - 1, 25);
+  assert.equal(rows.at(-1).values[0].userEnteredValue.numberValue, 25);
+  assert.equal(rows.at(-1).values[3].userEnteredValue.stringValue, 'Верно');
+  conn.prepare('UPDATE rooms SET amc_year=NULL WHERE id=?').run(room.roomId);
+  globalThis.__taskbattleTestEnv.GOOGLE_SPREADSHEET_ID = 'synthetic_test_document_12345';
+  globalThis.__taskbattleTestEnv.GOOGLE_SERVICE_ACCOUNT_JSON = '{}';
+  try {
+    const out = await call(`/attempts/${a.attemptId}/export`, {
+      method: 'POST',
+      teacher: true,
+      secret: room.teacherKey,
+      body: { format: 'amc8' },
+    });
+    assert.equal(out.status, 400);
+    assert.match(out.data.error, /год AMC/);
+  } finally {
+    delete globalThis.__taskbattleTestEnv.GOOGLE_SPREADSHEET_ID;
+    delete globalThis.__taskbattleTestEnv.GOOGLE_SERVICE_ACCOUNT_JSON;
+  }
+});
+test('legacy active migration seeds accepted time, adopts current visit and fences old writes', async (t) => {
+  const { room, a: first } = await partialFixture(t, 3);
+  now += 500;
+  let out = await submit(first, {
+    requestId: crypto.randomUUID(),
+    taskId: first.tasks[0].id,
+    position: 0,
+    answer: '5',
+    durationMs: 500,
+    readyId: first.readyId,
+  });
+  assert.equal(out.status, 200);
+  const a = await ready({ ...out.data, key: first.key });
+  now += 700;
+  out = await call(`/attempts/${a.attemptId}/journey`, { secret: a.key });
+  Object.assign(a, out.data);
+  a.owner = crypto.randomUUID();
+  assert.equal(a.completedMs, 500);
+  assert.equal(a.journey.visit.taskId, a.tasks[1].id);
+  assert.equal(a.journey.visit.owner, 'legacy');
+  await command(a, { action: 'adopt-legacy' });
+  await command(a, { action: 'close', id: a.journey.visit.id, durationMs: 700 });
+  assert.equal(a.completedMs, 1200);
+  assert.equal(
+    (
+      await submit(a, {
+        requestId: crypto.randomUUID(),
+        taskId: a.tasks[1].id,
+        position: 1,
+        answer: '5',
+        durationMs: 700,
+        readyId: a.readyId,
+      })
+    ).status,
+    409,
+  );
+  await command(a, {
+    action: 'finish',
+    requestId: crypto.randomUUID(),
+    version: a.journey.version,
+  });
+  assert.equal(a.summary.totalMs, 1200);
+  assert.equal(
+    (await call(`/attempts/${a.attemptId}/report`, { teacher: true, secret: room.teacherKey })).data
+      .summary.submitted,
+    1,
+  );
 });

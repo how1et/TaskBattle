@@ -9,6 +9,8 @@ export default function Home() {
   const {
     title,
     setTitle,
+    amcYear,
+    setAmcYear,
     tasks,
     setTasks,
     error,
@@ -58,6 +60,22 @@ export default function Home() {
               }}
               disabled={busy}
             />
+            <label className="metadata-field">
+              Год AMC <span className="muted small">необязательно</span>
+              <Input
+                className="text-input"
+                aria-label="Год AMC"
+                inputMode="numeric"
+                maxLength={4}
+                value={amcYear}
+                disabled={busy}
+                placeholder="Например, 2025"
+                onChange={(e) => {
+                  resetCreation();
+                  setAmcYear(e.target.value);
+                }}
+              />
+            </label>
             <div className="section-title task-title">
               <span className="step">02</span>
               <h2>Задачи</h2>
@@ -127,6 +145,23 @@ export default function Home() {
                             ts.map((t) =>
                               t.id === task.id ? { ...t, answer: e.target.value } : t,
                             ),
+                          );
+                        }}
+                      />
+                      <label htmlFor={task.id + '-topic'}>
+                        Тема задачи <span className="muted small">необязательно</span>
+                      </label>
+                      <Input
+                        id={task.id + '-topic'}
+                        className="text-input"
+                        placeholder="Например, геометрия"
+                        maxLength={200}
+                        value={task.topic}
+                        disabled={busy}
+                        onChange={(e) => {
+                          resetCreation();
+                          setTasks((ts) =>
+                            ts.map((t) => (t.id === task.id ? { ...t, topic: e.target.value } : t)),
                           );
                         }}
                       />

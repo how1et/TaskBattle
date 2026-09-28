@@ -1,5 +1,7 @@
 'use client';
 import { AttemptSolver } from '@/components/attempt-solver';
+import { JourneySolver } from '@/components/journey-solver';
+import { ExportResults } from '@/components/export-results';
 import { Frame, Report, Share } from '@/components/quest-presentation';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -43,9 +45,10 @@ export default function Battle({ view }: { view: string[] }) {
   const a = kind === 'attempt' || reportId ? (data as AttemptData | null) : null;
   const busy = starting;
   const active = !expired && kind === 'attempt' && a?.finishedAt === null;
-  const desired = active
-    ? a.tasks.slice(a.position, a.position + 3).map((t) => ({ id: t.id, path: t.photo }))
-    : [];
+  const desired =
+    active && !a.journey
+      ? a.tasks.slice(a.position, a.position + 3).map((t) => ({ id: t.id, path: t.photo }))
+      : [];
   const { photos, error: photoError, retry: retryPhotos } = usePhotos(desired, key);
   useEffect(() => {
     if (a?.finishedAt) window.scrollTo({ top: 0, behavior: 'auto' });
@@ -59,7 +62,8 @@ export default function Battle({ view }: { view: string[] }) {
     if (
       'attemptId' in d &&
       old?.attemptId === d.attemptId &&
-      (old.position > d.position || (old.finishedAt !== null && d.finishedAt === null))
+      ((!d.journey && old.position > d.position) ||
+        (old.finishedAt !== null && d.finishedAt === null))
     )
       return;
     d.clockOffset ??= old?.clockOffset ?? d.serverNow - Date.now();
@@ -75,7 +79,7 @@ export default function Battle({ view }: { view: string[] }) {
           ? `/rooms/${id}`
           : kind === 'teacher' && !reportId
             ? `/rooms/${id}/teacher`
-            : `/attempts/${reportId || id}${reportId ? '/report' : ''}`;
+            : `/attempts/${reportId || id}${reportId ? '/report' : '/journey'}`;
       accept(await api(path, key, kind === 'teacher'));
     } catch (e) {
       onError(e);
@@ -383,6 +387,7 @@ export default function Battle({ view }: { view: string[] }) {
           )}
           {common}
           <Report data={a} secret={key} teacher={!!reportId} />
+          {reportId && <ExportResults data={a} secret={key} />}
           {!reportId && now < (a.roomExpiresAt || 0) && (
             <Button
               variant="outline"
@@ -419,7 +424,7 @@ export default function Battle({ view }: { view: string[] }) {
         </div>
       </Frame>
     );
-  if (!a || !a.tasks[a.position])
+  if (!a || (!a.journey && !a.tasks[a.position]))
     return (
       <Frame>
         <div className="panel state-card stack">
@@ -433,15 +438,19 @@ export default function Battle({ view }: { view: string[] }) {
     );
   return (
     <Frame focus>
-      <AttemptSolver
-        key={a.attemptId + ':' + a.position}
-        a={a}
-        secret={key}
-        photos={photos}
-        accept={accept}
-        onError={onError}
-        common={common}
-      />
+      {a.journey ? (
+        <JourneySolver key={a.attemptId} a={a} secret={key} accept={accept} />
+      ) : (
+        <AttemptSolver
+          key={a.attemptId + ':' + a.position}
+          a={a}
+          secret={key}
+          photos={photos}
+          accept={accept}
+          onError={onError}
+          common={common}
+        />
+      )}
     </Frame>
   );
 }

@@ -54,6 +54,22 @@ export async function createRoom(req: Request, ip: string, trace: RequestTrace) 
   await limit('create:global', 100, 86400000);
   const title = String(form.get('title') || '').trim() || 'Занятие без названия';
   if (title.length > LIMITS.titleLength) fail(400, 'Название — не больше 100 символов.');
+  const yearText = String(form.get('amcYear') || '').trim();
+  const amcYear = yearText ? Number(yearText) : null;
+  if (amcYear !== null && (!Number.isInteger(amcYear) || amcYear < 1900 || amcYear > 2200))
+    fail(400, 'Год AMC — от 1900 до 2200.');
+  let topics: unknown = [];
+  try {
+    topics = JSON.parse(String(form.get('topics') || '[]'));
+  } catch {
+    fail(400, 'Проверьте темы задач.');
+  }
+  if (
+    !Array.isArray(topics) ||
+    topics.length > 25 ||
+    topics.some((t) => typeof t !== 'string' || t.length > 200)
+  )
+    fail(400, 'Тема — не больше 200 символов.');
   let correct: unknown;
   try {
     correct = JSON.parse(String(form.get('answers')));
@@ -110,12 +126,13 @@ export async function createRoom(req: Request, ip: string, trace: RequestTrace) 
         file_key: key,
         mime: checked[i].mime,
         answer: String(values[i]).trim(),
+        topic: String((topics as string[])[i] || '').trim() || null,
       });
     }
     trace.phase = 'commit-room';
     await db().batch([
       sql(
-        'INSERT INTO rooms (id,request_id,title,teacher_hash,created_at,expires_at,count) VALUES (?,?,?,?,?,?,?)',
+        'INSERT INTO rooms (id,request_id,title,teacher_hash,created_at,expires_at,count,amc_year) VALUES (?,?,?,?,?,?,?,?)',
         roomId,
         requestId,
         title,
@@ -123,16 +140,18 @@ export async function createRoom(req: Request, ip: string, trace: RequestTrace) 
         now,
         expires,
         files.length,
+        amcYear,
       ),
       ...taskRows.map((t) =>
         sql(
-          'INSERT INTO tasks (id,room_id,ordinal,file_key,mime,answer) VALUES (?,?,?,?,?,?)',
+          'INSERT INTO tasks (id,room_id,ordinal,file_key,mime,answer,topic) VALUES (?,?,?,?,?,?,?)',
           t.id,
           roomId,
           t.ordinal,
           t.file_key,
           t.mime,
           t.answer,
+          t.topic,
         ),
       ),
       ...keys.map((k) => sql('UPDATE blobs SET expires_at=? WHERE key=?', expires, k)),

@@ -6,6 +6,7 @@ export type Room = {
   created_at: number;
   expires_at: number;
   count: number;
+  amc_year: number | null;
 };
 export type Attempt = {
   id: string;
@@ -24,6 +25,8 @@ export type Attempt = {
   finish_request_id: string | null;
   unfinished_ms: number;
   timing_incomplete: number;
+  state_version: number;
+  selected_task_id: string | null;
 };
 export type Task = {
   id: string;
@@ -32,6 +35,7 @@ export type Task = {
   file_key: string;
   mime: string;
   answer: string;
+  topic: string | null;
 };
 export class HttpError extends Error {
   constructor(
@@ -89,6 +93,7 @@ export const photo = (r: string, t: string) => `/api/rooms/${r}/photos/${t}`;
 export const roomPublic = (r: Room, ts: Task[]) => ({
   roomId: r.id,
   title: r.title,
+  amcYear: r.amc_year,
   count: r.count,
   createdAt: r.created_at,
   expiresAt: r.expires_at,
