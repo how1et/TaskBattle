@@ -1,0 +1,11 @@
+[Unit]
+Description=Run TaskBattle cleanup every minute
+
+[Timer]
+OnCalendar=*-*-* *:*:00
+Persistent=true
+AccuracySec=1s
+Unit=taskbattle-cleanup.service
+
+[Install]
+WantedBy=timers.target

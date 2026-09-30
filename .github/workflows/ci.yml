@@ -24,3 +24,14 @@ jobs:
       - run: npm run typecheck
       - run: npm test
       - run: npm run build
+      - run: npm run build:yandex
+      - name: Verify Node server with persistent SQLite and local test images
+        run: |
+          npm run dev:yandex > /tmp/taskbattle-local.log 2>&1 &
+          app_pid=$!
+          trap 'kill "$app_pid" 2>/dev/null || true' EXIT
+          for i in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:3000/api/health > /dev/null; then break; fi
+            sleep 1
+          done
+          TEST_URL=http://127.0.0.1:3000 npm run test:integration

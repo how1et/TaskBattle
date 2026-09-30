@@ -1,0 +1,13 @@
+# Every value must come from the owner's chosen Yandex Cloud resources.
+# Empty required values deliberately cannot create a usable deployment.
+cloud_id                   = ""
+folder_id                  = ""
+runtime_service_account_id = ""
+image_id                   = ""
+zone                       = ""
+name                       = ""
+subnet_cidr                = ""
+ssh_admin_cidr             = ""
+ssh_public_key             = ""
+photo_bucket_name          = ""
+backup_bucket_name         = ""

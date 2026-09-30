@@ -1,4 +1,6 @@
 import { LIMITS } from './limits';
+import { env } from 'cloudflare:workers';
+import { handleMigration, assertNotFrozen } from './server/migration';
 import {
   assertAccessTime,
   attempt,
@@ -44,19 +46,52 @@ export async function handle(req: Request) {
     const url = new URL(req.url);
     const p = url.pathname.split('/').filter(Boolean).slice(1);
     const method = req.method;
-    if (method !== 'GET' && req.headers.get('origin') && req.headers.get('origin') !== url.origin)
+    const expectedOrigin = env.RUNTIME === 'yandex' ? env.APP_ORIGIN || url.origin : url.origin;
+    if (
+      method !== 'GET' &&
+      req.headers.get('origin') &&
+      req.headers.get('origin') !== expectedOrigin
+    )
       fail(403, 'Откройте ссылку TaskBattle в браузере и повторите действие.');
     if (req.headers.get('sec-fetch-site') === 'cross-site')
       fail(403, 'Откройте ссылку TaskBattle в браузере и повторите действие.');
+    if (p[0] === 'migration') return await handleMigration(req, p.slice(1));
     if (p[0] === 'health') return Response.json({ ok: true }, { headers });
+    if (env.MAINTENANCE)
+      fail(
+        503,
+        'Сайт обновляется. Ваши ответы сохранены. Повторите действие позже.',
+        'maintenance',
+      );
+    if (env.MIGRATION_SECRET || env.RUNTIME === 'yandex') await assertNotFrozen();
+    if (
+      env.MIGRATION_DRAIN === '1' &&
+      method === 'POST' &&
+      p[0] === 'rooms' &&
+      (p.length === 1 || p[2] === 'start')
+    )
+      fail(
+        503,
+        'Готовим обновление TaskBattle. Новую комнату или попытку можно будет открыть немного позже.',
+        'maintenance-drain',
+      );
     const ip = await hash(
-      (req.headers.get('cf-connecting-ip') || 'local') +
+      ((env.RUNTIME === 'yandex'
+        ? req.headers.get('x-taskbattle-client-ip')
+        : req.headers.get('cf-connecting-ip')) || 'local') +
         ':' +
         new Date().toISOString().slice(0, 10),
     );
     await limit('api:' + ip, 900, 60000);
     let result: unknown;
     if (p[0] === 'cleanup' && method === 'POST') {
+      if (env.RUNTIME === 'yandex') {
+        if (
+          !env.CLEANUP_SECRET ||
+          (await hash(req.headers.get('x-cleanup-key') || '')) !== (await hash(env.CLEANUP_SECRET))
+        )
+          fail(403, 'Нет доступа.');
+      }
       await limit('cleanup:global', 1, 60000);
       result = await cleanup();
     } else if (p[0] === 'rooms' && p.length === 1 && method === 'POST')

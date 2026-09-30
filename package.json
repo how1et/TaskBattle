@@ -3,19 +3,23 @@
   "version": "0.1.0",
   "private": true,
   "engines": {
-    "node": ">=22.13.0"
+    "node": ">=24.15.0 <25"
   },
   "scripts": {
     "install:ci": "node scripts/install-ci.mjs",
     "dev": "node scripts/run-framework.mjs dev",
     "build": "node scripts/run-framework.mjs build",
+    "build:yandex": "node scripts/build-yandex.mjs",
+    "start:yandex": "node runtime/start.mjs",
+    "dev:yandex": "node scripts/local-yandex.mjs",
+    "migrate:yandex": "node runtime/migrate.mjs",
     "start": "node --import ./scripts/sites-env.mjs ./node_modules/wrangler/bin/wrangler.js dev --config dist/server/wrangler.json --local --persist-to .wrangler/state --ip 127.0.0.1 --inspector-port 0",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
     "db:generate": "drizzle-kit generate",
     "test": "node --test tests/*.test.mjs",
     "typecheck": "tsc --noEmit",
-    "format": "prettier --write \"{app,components,lib,db,tests}/**/*.{ts,tsx,mjs}\" \"docs/**/*.md\" README.md CONTRIBUTING.md",
-    "format:check": "prettier --check \"{app,components,lib,db,tests}/**/*.{ts,tsx,mjs}\" \"docs/**/*.md\" README.md CONTRIBUTING.md",
+    "format": "prettier --write \"{app,components,lib,db,tests,runtime}/**/*.{ts,tsx,mjs}\" \"docs/**/*.md\" README.md CONTRIBUTING.md",
+    "format:check": "prettier --check \"{app,components,lib,db,tests,runtime}/**/*.{ts,tsx,mjs}\" \"docs/**/*.md\" README.md CONTRIBUTING.md",
     "test:integration": "node scripts/integration.mjs"
   },
   "dependencies": {
@@ -28,6 +32,7 @@
     "date-fns": "^4.4.0",
     "drizzle-orm": "0.45.2",
     "embla-carousel-react": "^8.6.0",
+    "exceljs": "^4.4.0",
     "input-otp": "^1.4.2",
     "lucide-react": "^1.31.0",
     "next": "16.3.4",

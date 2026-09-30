@@ -1,0 +1,28 @@
+[Unit]
+Description=TaskBattle consistent SQLite backup to private Object Storage
+After=network-online.target
+Wants=network-online.target
+ConditionPathExists=/var/lib/taskbattle/taskbattle.sqlite
+
+[Service]
+Type=oneshot
+User=taskbattle
+Group=taskbattle
+WorkingDirectory=/opt/taskbattle/current
+EnvironmentFile=/etc/taskbattle/runtime.env
+# This directory belongs exclusively to this serial systemd job, never manual backups.
+StateDirectory=taskbattle-backup
+StateDirectoryMode=0700
+# Cover both a previous host crash and normal failure/timeout. Never touch the live DB.
+ExecStartPre=/usr/bin/find /var/lib/taskbattle-backup -maxdepth 1 -type f -name *.sqlite* -delete
+ExecStart=/usr/bin/env BACKUP_SCRATCH_DIR=/var/lib/taskbattle-backup /usr/bin/node runtime/backup.mjs
+ExecStopPost=/usr/bin/find /var/lib/taskbattle-backup -maxdepth 1 -type f -name *.sqlite* -delete
+# Keep a full run below one day so the 9-day objects / 7-day snapshots gap holds.
+TimeoutStartSec=7200
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/taskbattle
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
