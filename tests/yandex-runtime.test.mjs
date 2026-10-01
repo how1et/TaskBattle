@@ -7,6 +7,53 @@ import { DatabaseSync } from 'node:sqlite';
 import { metadataToken, objectStore, lockboxSecrets } from '../runtime/yandex.mjs';
 import { createBackup, restoreBackup } from '../runtime/backup.mjs';
 import { migrateDatabase } from '../runtime/migrate.mjs';
+import { initialize } from '../runtime/initialize.mjs';
+
+test('runtime rejects partial bridge configuration and reused privileged keys', async () => {
+  const previous = { ...process.env };
+  const keys = [
+    'APP_ORIGIN',
+    'CLEANUP_SECRET',
+    'MIGRATION_SECRET',
+    'MIGRATION_BRIDGE_KEY',
+    'MIGRATION_SOURCE_ORIGIN',
+    'YANDEX_LOCKBOX_SECRET_ID',
+  ];
+  try {
+    for (const key of keys) delete process.env[key];
+    Object.assign(process.env, {
+      APP_ORIGIN: 'https://destination.example',
+      CLEANUP_SECRET: 'a'.repeat(64),
+      MIGRATION_SECRET: 'b'.repeat(64),
+    });
+    await initialize({ database: false });
+    process.env.MIGRATION_BRIDGE_KEY = 'c'.repeat(64);
+    await assert.rejects(initialize({ database: false }));
+    process.env.MIGRATION_SOURCE_ORIGIN = 'https://source.example';
+    const valid = await initialize({ database: false });
+    assert.equal(valid.env.MIGRATION_BRIDGE_KEY, 'c'.repeat(64));
+    for (const value of ['a'.repeat(64), 'b'.repeat(64), 'invalid']) {
+      process.env.MIGRATION_BRIDGE_KEY = value;
+      await assert.rejects(initialize({ database: false }));
+    }
+    process.env.MIGRATION_BRIDGE_KEY = 'c'.repeat(64);
+    for (const value of [
+      'http://source.example',
+      'https://source.example/path',
+      'https://destination.example',
+    ]) {
+      process.env.MIGRATION_SOURCE_ORIGIN = value;
+      await assert.rejects(initialize({ database: false }));
+    }
+  } finally {
+    for (const key of keys) {
+      if (previous[key] === undefined) delete process.env[key];
+      else process.env[key] = previous[key];
+    }
+    delete globalThis.__taskbattleRuntime;
+    delete globalThis.__taskbattleExportConfig;
+  }
+});
 
 test('Yandex metadata token coalesces, refreshes; Lockbox returns only explicit server secrets', async () => {
   let n = 0;
@@ -22,11 +69,13 @@ test('Yandex metadata token coalesces, refreshes; Lockbox returns only explicit 
     return Response.json({
       entries: [
         { key: 'CLEANUP_SECRET', textValue: 'fixture' },
+        { key: 'MIGRATION_BRIDGE_KEY', textValue: 'a'.repeat(64) },
         { key: 'NODE_OPTIONS', textValue: 'unsafe' },
       ],
     });
   });
   assert.equal(config.CLEANUP_SECRET, 'fixture');
+  assert.equal(config.MIGRATION_BRIDGE_KEY, 'a'.repeat(64));
   assert.equal(config.NODE_OPTIONS, undefined);
 });
 

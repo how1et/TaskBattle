@@ -163,6 +163,8 @@ export async function handleMigration(req: Request, parts: string[]) {
           'migration-active-attempts',
         );
     } else {
+      if (env.MIGRATION_TARGET_ORIGIN)
+        fail(409, 'Старая площадка переведена в режим перенаправления.', 'bridge-source-retired');
       await sql(
         'UPDATE migration_gate SET frozen=0,frozen_at=NULL,updated_at=MAX(?,updated_at+1) WHERE singleton=1 AND frozen=1',
         Date.now(),

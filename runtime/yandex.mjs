@@ -52,6 +52,7 @@ export async function lockboxSecrets(secretId, token, fetcher = fetch) {
       [
         'CLEANUP_SECRET',
         'MIGRATION_SECRET',
+        'MIGRATION_BRIDGE_KEY',
         'YANDEX_DISK_TOKEN',
         'YANDEX_OAUTH_CLIENT_ID',
         'YANDEX_OAUTH_CLIENT_SECRET',

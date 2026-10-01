@@ -123,6 +123,20 @@ async function fixture(t) {
   return { conn, objects, env, migrationApi, call, freeze, client };
 }
 
+test('retired source cannot unfreeze while the transition bridge is configured', async (t) => {
+  const state = await fixture(t);
+  await state.freeze();
+  state.env.MIGRATION_TARGET_ORIGIN = 'https://destination.example';
+  const response = await state.call('unfreeze', { method: 'POST', confirm: true });
+  assert.equal(response.status, 409);
+  assert.equal((await response.json()).code, 'bridge-source-retired');
+  assert.equal(state.conn.prepare('SELECT frozen FROM migration_gate').get().frozen, 1);
+  assert.throws(
+    () => state.conn.exec("UPDATE answers SET answer='stale'"),
+    /TASKBATTLE_MAINTENANCE/,
+  );
+});
+
 test('migration endpoint is disabled unless configured and rejects absent or incorrect credentials', async (t) => {
   const f = await fixture(t);
   assert.equal((await f.call('status', { supplied: null })).status, 403);

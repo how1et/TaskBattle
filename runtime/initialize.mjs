@@ -15,12 +15,28 @@ export async function initialize({ database = true } = {}) {
   const cleanup = secrets.CLEANUP_SECRET || config.CLEANUP_SECRET;
   if (!/^[a-f0-9]{64}$/.test(cleanup || ''))
     throw new Error('Configure CLEANUP_SECRET in Lockbox before starting');
+  const migrationSecret = secrets.MIGRATION_SECRET || config.MIGRATION_SECRET;
+  const bridgeKey = secrets.MIGRATION_BRIDGE_KEY || config.MIGRATION_BRIDGE_KEY;
+  if (config.MIGRATION_SOURCE_ORIGIN || bridgeKey) {
+    const source = new URL(config.MIGRATION_SOURCE_ORIGIN || '');
+    if (
+      source.protocol !== 'https:' ||
+      source.origin !== config.MIGRATION_SOURCE_ORIGIN ||
+      source.origin === origin.origin ||
+      !/^[a-f0-9]{64}$/.test(bridgeKey || '') ||
+      bridgeKey === migrationSecret ||
+      bridgeKey === cleanup
+    )
+      throw new Error('Configure a distinct bridge key and canonical source origin');
+  }
   const env = {
     RUNTIME: 'yandex',
     APP_ORIGIN: config.APP_ORIGIN,
     CLEANUP_SECRET: cleanup,
-    MIGRATION_SECRET: secrets.MIGRATION_SECRET || config.MIGRATION_SECRET,
+    MIGRATION_SECRET: migrationSecret,
     MIGRATION_DRAIN: config.MIGRATION_DRAIN,
+    MIGRATION_SOURCE_ORIGIN: config.MIGRATION_SOURCE_ORIGIN,
+    MIGRATION_BRIDGE_KEY: bridgeKey,
   };
   Object.defineProperty(env, 'MAINTENANCE', {
     get: () => existsSync(config.MAINTENANCE_FILE || '/var/lib/taskbattle/maintenance'),

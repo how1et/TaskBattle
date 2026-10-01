@@ -82,7 +82,7 @@ resource "yandex_compute_instance" "app" {
   }
   metadata = {
     serial-port-enable = "0"
-    user-data          = "#cloud-config\n${yamlencode({
+    user-data = "#cloud-config\n${yamlencode({
       package_update = true
       packages       = ["ca-certificates", "curl", "xz-utils", "caddy", "sqlite3"]
       ssh_pwauth     = false
@@ -135,9 +135,9 @@ resource "yandex_storage_bucket" "photos" {
     }
   }
   lifecycle_rule {
-    id                                    = "abandoned-multipart-one-day"
-    enabled                               = true
-    prefix                                = ""
+    id                                     = "abandoned-multipart-one-day"
+    enabled                                = true
+    prefix                                 = ""
     abort_incomplete_multipart_upload_days = 1
   }
   lifecycle {
@@ -152,7 +152,7 @@ resource "yandex_storage_bucket" "backups" {
   force_destroy         = false
   default_storage_class = "STANDARD"
   # Actual stored bytes are billed; leave room for photos, database snapshots and churn.
-  max_size              = 32212254720
+  max_size = 32212254720
   anonymous_access_flags {
     read        = false
     list        = false

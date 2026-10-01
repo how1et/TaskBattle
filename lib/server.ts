@@ -1,6 +1,7 @@
 import { LIMITS } from './limits';
 import { env } from 'cloudflare:workers';
 import { handleMigration, assertNotFrozen } from './server/migration';
+import { verifiedBridgeClientIp } from './server/bridge';
 import {
   assertAccessTime,
   attempt,
@@ -43,6 +44,8 @@ const headers = {
 export async function handle(req: Request) {
   const trace: RequestTrace = { id: crypto.randomUUID(), phase: 'request', started: Date.now() };
   try {
+    const bridge = await verifiedBridgeClientIp(req, env);
+    if (bridge.error) return bridge.error;
     const url = new URL(req.url);
     const p = url.pathname.split('/').filter(Boolean).slice(1);
     const method = req.method;
@@ -77,7 +80,7 @@ export async function handle(req: Request) {
       );
     const ip = await hash(
       ((env.RUNTIME === 'yandex'
-        ? req.headers.get('x-taskbattle-client-ip')
+        ? bridge.clientIp || req.headers.get('x-taskbattle-client-ip')
         : req.headers.get('cf-connecting-ip')) || 'local') +
         ':' +
         new Date().toISOString().slice(0, 10),
