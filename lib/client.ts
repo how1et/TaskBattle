@@ -80,10 +80,11 @@ export async function api<T>(
   key?: string,
   teacher = false,
   body?: unknown,
+  timeoutMs = 20000,
 ): Promise<T> {
   const sentAt = Date.now();
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 20000);
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const response = await fetch('/api' + path, {
       method: body === undefined ? 'GET' : 'POST',

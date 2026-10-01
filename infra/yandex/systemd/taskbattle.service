@@ -1,0 +1,26 @@
+[Unit]
+Description=TaskBattle application
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=taskbattle
+Group=taskbattle
+WorkingDirectory=/opt/taskbattle/current
+EnvironmentFile=/etc/taskbattle/runtime.env
+ExecStart=/usr/bin/node runtime/start.mjs
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+KillSignal=SIGTERM
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/taskbattle
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+
+[Install]
+WantedBy=multi-user.target

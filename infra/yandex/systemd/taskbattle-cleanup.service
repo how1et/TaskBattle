@@ -1,0 +1,20 @@
+[Unit]
+Description=TaskBattle expired-data cleanup
+After=network-online.target taskbattle.service
+ConditionPathExists=!/var/lib/taskbattle/maintenance
+
+[Service]
+Type=oneshot
+User=taskbattle
+Group=taskbattle
+WorkingDirectory=/opt/taskbattle/current
+EnvironmentFile=/etc/taskbattle/runtime.env
+ExecStart=/usr/bin/node runtime/cleanup.mjs
+TimeoutStartSec=55
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/taskbattle
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6

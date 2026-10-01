@@ -1,0 +1,19 @@
+{
+    admin 127.0.0.1:2019
+}
+
+__DOMAIN__ {
+    request_body {
+        max_size 20MB
+    }
+    encode zstd gzip
+    reverse_proxy 127.0.0.1:3000 {
+        header_up X-TaskBattle-Client-IP {remote_host}
+        header_up -CF-Connecting-IP
+        header_up -True-Client-IP
+        # Bridge headers pass through unchanged and require the server-side
+        # shared secret plus an exact source origin before trusting their IP.
+    }
+    # No access-log directive: room codes and student paths must not be logged.
+    # The runtime checks /var/lib/taskbattle/maintenance before handling requests.
+}

@@ -38,4 +38,4 @@ const solution=a.report.find(t=>t.solutionPhoto).solutionPhoto;
 for(const headers of [{'x-attempt-key':attemptKey},{'x-teacher-key':teacherKey}])assert.equal((await fetch(base+solution,{headers})).status,200);
 for(const headers of [{},{'x-attempt-key':secondKey}])assert.equal((await fetch(base+solution,{headers})).status,403);console.log('PASS private solution photo for student/teacher, independent attempt');
 const state={base,roomId,attemptId,attemptKey,secondId,secondKey,teacherKey,photo:publicRoom.tasks[0].photo,solution,expiresAt:room.expiresAt,resultExpiresAt:a.resultExpiresAt};
-await writeFile(process.env.TEST_STATE_FILE||'../integration-state.json',JSON.stringify(state,null,2));console.log('PASS local Worker + D1 + R2 integration');
+await writeFile(process.env.TEST_STATE_FILE||'../integration-state.json',JSON.stringify(state,null,2));console.log('PASS local HTTP integration (storage is supplied by the tested runtime)');

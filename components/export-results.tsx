@@ -14,6 +14,7 @@ import {
   AlertDialogFooter,
 } from './ui/alert-dialog';
 export function ExportResults({ data, secret }: { data: AttemptData; secret: string }) {
+  const yandex = process.env.NEXT_PUBLIC_EXPORT_PROVIDER === 'yandex';
   const [format, setFormat] = useState('amc8'),
     [year, setYear] = useState(String(data.amcYear || '')),
     [error, setError] = useState(''),
@@ -26,10 +27,16 @@ export function ExportResults({ data, secret }: { data: AttemptData; secret: str
     setBusy(true);
     setError('');
     try {
-      const out = await api<{ url: string }>(`/attempts/${data.attemptId}/export`, secret, true, {
-        format,
-        year,
-      });
+      const out = await api<{ url: string }>(
+        `/attempts/${data.attemptId}/export`,
+        secret,
+        true,
+        {
+          format,
+          year,
+        },
+        90000,
+      );
       setUrl(out.url);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Не удалось сохранить лист. Повторите.');
@@ -47,10 +54,13 @@ export function ExportResults({ data, secret }: { data: AttemptData; secret: str
         </Button>
       </AlertDialogTrigger>
       <AlertDialogContent>
-        <AlertDialogTitle>Сохранить в Google Таблицы</AlertDialogTitle>
+        <AlertDialogTitle>
+          {yandex ? 'Сохранить на Яндекс Диск' : 'Сохранить в Google Таблицы'}
+        </AlertDialogTitle>
         <AlertDialogDescription>
-          В документе «Результаты TASKBATTLE» появится отдельный лист для этой попытки. Повторное
-          сохранение откроет тот же лист.
+          {yandex
+            ? 'В файле «Результаты TASKBATTLE.xlsx» появится отдельный лист для этой попытки. Повторное сохранение не создаст копию. Не редактируйте файл во время сохранения.'
+            : 'В документе «Результаты TASKBATTLE» появится отдельный лист для этой попытки. Повторное сохранение откроет тот же лист.'}
         </AlertDialogDescription>
         <div className="export-form">
           <label>
@@ -101,7 +111,7 @@ export function ExportResults({ data, secret }: { data: AttemptData; secret: str
           {url && (
             <a className="link-text row" href={url} target="_blank" rel="noreferrer">
               <ExternalLink size={18} />
-              Открыть сохранённый лист
+              {yandex ? 'Открыть файл результатов' : 'Открыть сохранённый лист'}
             </a>
           )}
         </div>
