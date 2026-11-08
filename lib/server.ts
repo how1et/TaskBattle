@@ -31,6 +31,7 @@ import {
 } from './server/context';
 import { createRoom } from './server/rooms';
 import { bucket } from './server/storage';
+import { effectiveResultExpirySql, ensureRetentionPolicy } from './server/retention-policy';
 export { cleanup };
 const headers = {
   'Cache-Control': 'private, no-store',
@@ -48,6 +49,7 @@ export async function handle(req: Request) {
       fail(403, 'Откройте ссылку TaskBattle в браузере и повторите действие.');
     if (req.headers.get('sec-fetch-site') === 'cross-site')
       fail(403, 'Откройте ссылку TaskBattle в браузере и повторите действие.');
+    await ensureRetentionPolicy();
     if (p[0] === 'health') return Response.json({ ok: true }, { headers });
     const ip = await hash(
       (req.headers.get('cf-connecting-ip') || 'local') +
@@ -81,10 +83,8 @@ export async function handle(req: Request) {
         await finalizeDue(r.id, LIMITS.attempts);
         const list = (
           await sql(
-            'SELECT id,started_at,deadline_at,finish_reason,finished_at,position,COALESCE(result_expires_at,finished_at+?) AS result_expires_at FROM attempts WHERE room_id=? AND (finished_at IS NULL OR COALESCE(result_expires_at,finished_at+?)>?) ORDER BY started_at,id',
-            LIMITS.resultTtlMs,
+            `SELECT id,started_at,deadline_at,finish_reason,finished_at,position,${effectiveResultExpirySql()} AS result_expires_at FROM attempts WHERE room_id=? AND (finished_at IS NULL OR ${effectiveResultExpirySql()}>?) ORDER BY started_at,id`,
             r.id,
-            LIMITS.resultTtlMs,
             Date.now(),
           ).all<{
             id: string;

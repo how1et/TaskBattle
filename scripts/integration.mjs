@@ -32,7 +32,7 @@ for(let position=0;position<count;position++){
  else{const out=await call(`/attempts/${attemptId}/answers`,{method:'POST',secret:attemptKey,body:payload});assert.equal(out.status,200,JSON.stringify(out));a=out.data;}
  assert.equal(a.position,position+1);assert.equal(a.completedMs,total);assert.deepEqual(a.tasks,order);if(position<24){assert.equal(a.taskStartedAt,null);assert.equal(JSON.stringify(a).includes('correctAnswer'),false);}
 }
-assert.equal(a.summary.totalMs,total);assert.equal(a.summary.averageMs,total/25);assert.equal(a.summary.correct,24);assert.equal(a.resultExpiresAt-a.finishedAt,259200000);console.log('PASS full 25-task report, exact milliseconds/mean, duplicate and lost-response retry, hidden answers and preserved order');
+assert.equal(a.summary.totalMs,total);assert.equal(a.summary.averageMs,total/25);assert.equal(a.summary.correct,24);assert.equal(a.resultExpiresAt-a.finishedAt,2419200000);console.log('PASS full 25-task report, exact milliseconds/mean, duplicate and lost-response retry, hidden answers and preserved order');
 const teacher=(await call(`/attempts/${attemptId}/report`,{secret:teacherKey,teacher:true})).data;assert.deepEqual(teacher.report,a.report);assert.equal((await call(`/attempts/${secondId}`,{secret:secondKey})).data.position,0);
 const solution=a.report.find(t=>t.solutionPhoto).solutionPhoto;
 for(const headers of [{'x-attempt-key':attemptKey},{'x-teacher-key':teacherKey}])assert.equal((await fetch(base+solution,{headers})).status,200);

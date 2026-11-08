@@ -1,4 +1,5 @@
 import { env } from 'cloudflare:workers';
+import { normalizeRoomRetention } from './retention-policy';
 export type Room = {
   id: string;
   title: string;
@@ -20,6 +21,7 @@ export type Attempt = {
   timing_version: number;
   ready_id: string | null;
   result_expires_at: number | null;
+  result_ttl_ms: number | null;
   deadline_at: number;
   finish_reason: 'completed' | 'manual' | 'timeout' | null;
   finish_request_id: string | null;
@@ -75,6 +77,7 @@ export async function secret(req: Request, expected: string, header = 'x-attempt
 }
 export async function room(id: string, allowClosed = false) {
   if (!validId(id)) fail(404, 'Комната не найдена.');
+  await normalizeRoomRetention(id);
   const r = await sql('SELECT * FROM rooms WHERE id = ?', id).first<Room>();
   if (!r) {
     const stamp = parseInt(id.split('.')[1] || '', 36);

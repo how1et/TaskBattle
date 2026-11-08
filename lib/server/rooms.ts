@@ -47,8 +47,8 @@ export async function createRoom(req: Request, ip: string, trace: RequestTrace) 
   if (existing) {
     if (existing.teacher_hash !== teacherHash)
       fail(409, 'Не удалось создать комнату. Откройте главную страницу и добавьте задачи заново.');
-    await room(existing.id);
-    return { roomId: existing.id, teacherKey, expiresAt: existing.expires_at };
+    const current = await room(existing.id);
+    return { roomId: current.id, teacherKey, expiresAt: current.expires_at };
   }
   await limit('create:' + ip, 5, 3600000);
   await limit('create:global', 100, 86400000);

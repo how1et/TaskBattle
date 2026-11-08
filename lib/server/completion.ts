@@ -1,5 +1,10 @@
 import { LIMITS } from '../limits';
 import { db, sql, type Attempt } from './context';
+import {
+  effectiveResultTtlSql,
+  ensureRetentionPolicy,
+  normalizeAttemptRetention,
+} from './retention-policy';
 
 // A terminal transition and retention changes share a D1 transaction. Answers
 // use the same unfinished/deadline predicate, so only one transition can win.
@@ -20,15 +25,16 @@ export function retention(id: string) {
   ];
 }
 export async function expireAttempt(id: string, now = Date.now()) {
+  await normalizeAttemptRetention(id);
   await sql(
-    `UPDATE attempts SET finished_at=deadline_at,result_expires_at=deadline_at+?,finish_reason='timeout',unfinished_ms=0,timing_incomplete=CASE WHEN ready_id IS NOT NULL OR (timing_version=1 AND task_started_at>0) THEN 1 ELSE timing_incomplete END WHERE id=? AND finished_at IS NULL AND deadline_at<=?`,
-    LIMITS.resultTtlMs,
+    `UPDATE attempts SET finished_at=deadline_at,result_expires_at=deadline_at+result_ttl_ms,finish_reason='timeout',unfinished_ms=0,timing_incomplete=CASE WHEN ready_id IS NOT NULL OR (timing_version=1 AND task_started_at>0) THEN 1 ELSE timing_incomplete END WHERE id=? AND finished_at IS NULL AND deadline_at<=?`,
     id,
     now,
   ).run();
 }
 export async function finalizeDue(roomId?: string, batchSize = 500) {
   const now = Date.now();
+  await ensureRetentionPolicy(now);
   await sql(
     `UPDATE attempts SET deadline_at=started_at+? WHERE id IN(SELECT id FROM attempts WHERE finished_at IS NULL AND deadline_at IS NULL ${roomId ? 'AND room_id=?' : ''} LIMIT ?)`,
     LIMITS.attemptTtlMs,
@@ -39,8 +45,7 @@ export async function finalizeDue(roomId?: string, batchSize = 500) {
   // storage requests are needed for a bounded bulk terminal transition.
   const rows = (
     await sql(
-      `UPDATE attempts SET finished_at=deadline_at,result_expires_at=deadline_at+?,finish_reason='timeout',unfinished_ms=0,timing_incomplete=CASE WHEN ready_id IS NOT NULL OR (timing_version=1 AND task_started_at>0) THEN 1 ELSE timing_incomplete END WHERE id IN(SELECT id FROM attempts WHERE finished_at IS NULL AND deadline_at<=? ${roomId ? 'AND room_id=?' : ''} ORDER BY deadline_at LIMIT ?) AND finished_at IS NULL RETURNING id`,
-      LIMITS.resultTtlMs,
+      `UPDATE attempts SET finished_at=deadline_at,result_ttl_ms=${effectiveResultTtlSql()},result_expires_at=deadline_at+${effectiveResultTtlSql()},finish_reason='timeout',unfinished_ms=0,timing_incomplete=CASE WHEN ready_id IS NOT NULL OR (timing_version=1 AND task_started_at>0) THEN 1 ELSE timing_incomplete END WHERE id IN(SELECT id FROM attempts WHERE finished_at IS NULL AND deadline_at<=? ${roomId ? 'AND room_id=?' : ''} ORDER BY deadline_at LIMIT ?) AND finished_at IS NULL RETURNING id`,
       now,
       ...(roomId ? [roomId] : []),
       batchSize,

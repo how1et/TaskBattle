@@ -37,7 +37,7 @@ export default function Home() {
           <div className="duration-tag">
             <Hourglass size={21} />
             <span>
-              Комната на <b>14 дней</b>
+              Комната на <b>14 суток</b>
             </span>
           </div>
         </div>
@@ -240,7 +240,7 @@ export default function Home() {
             </div>
             <p className="room-lifetime">
               <Hourglass size={18} />
-              Комната — 14 дней. Отчёт — 72 часа после завершения.
+              Комната — 14 суток. Отчёт — 28 суток после завершения.
             </p>
           </aside>
         </div>

@@ -23,6 +23,7 @@ import {
 } from './context';
 import { bucket, discardUnusedPhoto } from './storage';
 import { expireAttempt, finishAttempt } from './completion';
+import { LEGACY_RESULT_TTL, normalizeAttemptRetention } from './retention-policy';
 const RESULT_TTL = LIMITS.resultTtlMs;
 type Answer = {
   task_id: string;
@@ -39,8 +40,19 @@ type Answer = {
   solution_digest: string | null;
 };
 export const resultExpiry = (a: Attempt) =>
-  a.result_expires_at ?? (a.finished_at ?? 0) + RESULT_TTL;
+  a.result_ttl_ms === RESULT_TTL
+    ? (a.finished_at ?? 0) + RESULT_TTL
+    : (a.result_expires_at ?? (a.finished_at ?? 0) + (a.result_ttl_ms ?? LEGACY_RESULT_TTL));
 export async function assertAccessTime(a: Attempt, _r: Room) {
+  if (
+    a.result_ttl_ms == null ||
+    (a.result_ttl_ms === RESULT_TTL &&
+      a.finished_at !== null &&
+      a.result_expires_at !== a.finished_at + RESULT_TTL)
+  ) {
+    await normalizeAttemptRetention(a.id);
+    Object.assign(a, await sql('SELECT * FROM attempts WHERE id=?', a.id).first<Attempt>());
+  }
   // An old Worker may create a row between the data migration and rollout.
   if (a.deadline_at == null) {
     await sql(
@@ -166,13 +178,14 @@ export async function start(req: Request, r: Room, ip: string) {
   const ids = (await roomTasks(r.id)).map((t) => t.id);
   const now = Date.now();
   await sql(
-    'INSERT INTO attempts (id,room_id,secret_hash,order_json,position,started_at,deadline_at,task_started_at,timing_version) SELECT ?,?,?,?,0,?,?,0,2 WHERE (SELECT count(*) FROM attempts WHERE room_id=?)<? AND EXISTS(SELECT 1 FROM rooms WHERE id=? AND expires_at>?) ON CONFLICT(id) DO NOTHING',
+    'INSERT INTO attempts (id,room_id,secret_hash,order_json,position,started_at,deadline_at,task_started_at,timing_version,result_ttl_ms) SELECT ?,?,?,?,0,?,?,0,2,? WHERE (SELECT count(*) FROM attempts WHERE room_id=?)<? AND EXISTS(SELECT 1 FROM rooms WHERE id=? AND expires_at>?) ON CONFLICT(id) DO NOTHING',
     data.attemptId,
     r.id,
     secretHash,
     JSON.stringify(ids),
     now,
     now + LIMITS.attemptTtlMs,
+    RESULT_TTL,
     r.id,
     LIMITS.attempts,
     r.id,

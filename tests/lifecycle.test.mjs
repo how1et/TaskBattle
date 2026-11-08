@@ -43,7 +43,8 @@ conn.exec(
     (await readFile(
       new URL('../drizzle/0005_navigation_and_exports.sql', import.meta.url),
       'utf8',
-    )),
+    )) +
+    (await readFile(new URL('../drizzle/0009_result_retention.sql', import.meta.url), 'utf8')),
 );
 class Statement {
   constructor(query) {
@@ -327,7 +328,7 @@ test('25 tasks, independent attempts, delays, photos, retries, expiry and cleanu
   assert.equal(a.summary.totalMs, total);
   assert.equal(a.summary.averageMs, total / 25);
   assert.equal(a.summary.correct, 24);
-  assert.equal(a.resultExpiresAt - a.finishedAt, 259200000);
+  assert.equal(a.resultExpiresAt - a.finishedAt, 2419200000);
   assert.equal(a.summary.fastest.ordinals.length, 24);
   const solution = a.report.find((t) => t.solutionPhoto).solutionPhoto;
   assert.equal((await call(solution.slice(4), { secret: a.key })).status, 200);
@@ -348,10 +349,12 @@ test('25 tasks, independent attempts, delays, photos, retries, expiry and cleanu
   conn
     .prepare('UPDATE attempts SET finished_at=?,result_expires_at=NULL,position=25 WHERE id=?')
     .run(now, b.attemptId);
-  const bExpiry = now + 259200000;
+  const bExpiry = now + 2419200000;
   // Model an attempt started near the end of a room's 14-day life.
   room.expiresAt = a.finishedAt + 7200000;
-  conn.prepare('UPDATE rooms SET expires_at=? WHERE id=?').run(room.expiresAt, room.roomId);
+  conn
+    .prepare('UPDATE rooms SET created_at=?,expires_at=? WHERE id=?')
+    .run(room.expiresAt - 1209600000, room.expiresAt, room.roomId);
   now = room.expiresAt + 1;
   assert.equal((await call('/rooms/' + room.roomId)).status, 410);
   assert.equal((await call('/attempts/' + a.attemptId, { secret: a.key })).status, 200);
@@ -774,6 +777,7 @@ test('finish wins during R2 upload: late attachment is removed, answer never add
   gate.release();
   const late = await sending;
   assert.equal(out.data.finishReason, 'manual');
+  assert.equal(out.data.resultExpiresAt - out.data.finishedAt, 2419200000);
   assert.equal(late.data.finishReason, 'manual');
   assert.equal(answerRows(a).length, 0);
   assert.equal(solutionKeys(a).length, 0);
@@ -803,10 +807,11 @@ test('last answer terminal result cannot be overwritten by manual finish', async
   const saved = await submit(a, payload, file);
   const out = await finish(a, { requestId: crypto.randomUUID(), position: 0, durationMs: 9000 });
   assert.equal(out.data.finishReason, 'completed');
+  assert.equal(out.data.resultExpiresAt - out.data.finishedAt, 2419200000);
   assert.equal(out.data.finishedAt, saved.data.finishedAt);
   assert.equal(out.data.summary.totalMs, 5000);
 });
-test('calendar deadline immutable across ready, late answer refused, timeout keeps exact deadline and 72h', async (t) => {
+test('calendar deadline immutable across ready, late answer refused, timeout keeps exact deadline and 28 days', async (t) => {
   const { a, payload, file } = await recoveryFixture(t);
   const deadline = a.startedAt + 86400000;
   assert.equal(a.deadlineAt, deadline);
@@ -821,16 +826,17 @@ test('calendar deadline immutable across ready, late answer refused, timeout kee
   assert.equal(solutionKeys(a).length, 0);
   const out = await call('/attempts/' + a.attemptId, { secret: a.key });
   assert.equal(out.data.finishedAt, deadline);
-  assert.equal(out.data.resultExpiresAt, deadline + 259200000);
+  assert.equal(out.data.resultExpiresAt, deadline + 2419200000);
   assert.equal(out.data.finishReason, 'timeout');
+  assert.equal(out.data.resultExpiresAt - out.data.finishedAt, 2419200000);
   assert.equal(out.data.timingIncomplete, true);
   assert.equal(out.data.summary.totalMs, 0);
   const manual = await finish(a);
   assert.equal(manual.data.finishReason, 'timeout');
-  now = deadline + 259200000;
+  now = deadline + 2419200000;
   assert.equal((await call('/attempts/' + a.attemptId, { secret: a.key })).status, 410);
 });
-test('14-day room closes to new starts while existing attempt/photos continue; result has own 72h', async (t) => {
+test('14-day room closes to new starts while existing attempt/photos continue; result has own 28 days', async (t) => {
   const { room } = await partialFixture(t);
   const r = (await call('/rooms/' + room.roomId)).data;
   assert.equal(r.expiresAt - r.createdAt, 1209600000);
@@ -856,7 +862,7 @@ test('14-day room closes to new starts while existing attempt/photos continue; r
   assert.equal(out.status, 200);
   a = { ...out.data, key: a.key };
   const report = await finish(a);
-  assert.equal(report.data.resultExpiresAt, now + 259200000);
+  assert.equal(report.data.resultExpiresAt, now + 2419200000);
   await cleanup();
   assert.equal(
     (await call(report.data.report[0].solutionPhoto.slice(4), { secret: a.key })).status,
@@ -874,7 +880,7 @@ test('closed-tab scheduled completion is bounded; backlog keeps shared photos; d
     .prepare(
       'UPDATE attempts SET finished_at=?,result_expires_at=? WHERE id<>? AND finished_at IS NULL',
     )
-    .run(now, now + 259200000, a.attemptId);
+    .run(now, now + 2419200000, a.attemptId);
   for (let i = 0; i < 500; i++)
     conn
       .prepare(
@@ -909,7 +915,7 @@ test('closed-tab scheduled completion is bounded; backlog keeps shared photos; d
   await cleanup();
   const final = conn.prepare('SELECT * FROM attempts WHERE id=?').get(a.attemptId);
   assert.equal(final.finished_at, row.deadline_at);
-  assert.equal(final.result_expires_at, row.deadline_at + 259200000);
+  assert.equal(final.result_expires_at, row.deadline_at + 2419200000);
 });
 test('data backfill extends live rooms only and preserves answers/files and completed expiry', () => {
   const old = new DatabaseSync(':memory:');
@@ -970,6 +976,7 @@ test('photo upload crossing deadline cannot attach to timeout report or leak an 
   gate.release();
   const out = await sending;
   assert.equal(out.data.finishReason, 'timeout');
+  assert.equal(out.data.resultExpiresAt - out.data.finishedAt, 2419200000);
   assert.equal(out.data.finishedAt, a.deadlineAt);
   assert.equal(answerRows(a).length, 0);
   assert.equal(solutionKeys(a).length, 0);
@@ -1102,6 +1109,7 @@ test('journey photo failures, lost commit acknowledgement, double click and stal
   await visit(a, 2, 800);
   await journeyAnswer(a, journeyPayload(a, 2, '0'));
   assert.equal(a.finishReason, 'completed');
+  assert.equal(a.resultExpiresAt - a.finishedAt, 2419200000);
   assert.equal(a.summary.totalMs, 2100);
   assert.equal(a.summary.wrong, 1);
 });
@@ -1134,6 +1142,7 @@ test('journey tabs arbitrate one visit; checkpoint takeover rejects old close; d
   now = a.deadlineAt + 60000;
   await command(a, { action: 'takeover', version: a.journey.version });
   assert.equal(a.finishReason, 'timeout');
+  assert.equal(a.resultExpiresAt - a.finishedAt, 2419200000);
   assert.equal(a.summary.totalMs, 1500);
   assert.equal(a.timingIncomplete, true);
   assert.equal(a.finishedAt, a.deadlineAt);
@@ -1286,6 +1295,7 @@ test('all 25 freely ordered answers complete exactly once and AMC8 retains 25 co
     if (n === 25) assert.equal(a.finishedAt, null);
   }
   assert.equal(a.finishReason, 'completed');
+  assert.equal(a.resultExpiresAt - a.finishedAt, 2419200000);
   assert.equal(a.position, 25);
   assert.equal(a.summary.correct, 13);
   const { sheetContent } = await loadModule('../lib/sheet-content.ts'),

@@ -6,7 +6,7 @@ export const LIMITS = {
   attempts: 120,
   roomTtlMs: 14 * 24 * 3600000,
   attemptTtlMs: 24 * 3600000,
-  resultTtlMs: 72 * 3600000,
+  resultTtlMs: 28 * 24 * 3600000,
   fileBytes: 3 * 1024 * 1024,
   roomBytes: 18 * 1024 * 1024,
   inputBytes: 30 * 1024 * 1024,

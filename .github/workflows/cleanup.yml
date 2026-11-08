@@ -24,6 +24,7 @@ jobs:
             count=$(printf '%s' "$result" | jq '.deletedFiles')
             finalized=$(printf '%s' "$result" | jq '.finalized // 0')
             deleted=$(printf '%s' "$result" | jq '.deletedAttempts // 0')
-            if [ "$count" -lt 500 ] && [ "$finalized" -lt 500 ] && [ "$deleted" -lt 500 ]; then exit 0; fi
+            migrated=$(printf '%s' "$result" | jq '.migratedRecords // 0')
+            if [ "$count" -lt 500 ] && [ "$finalized" -lt 500 ] && [ "$deleted" -lt 500 ] && [ "$migrated" -lt 500 ]; then exit 0; fi
             sleep 65
           done

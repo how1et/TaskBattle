@@ -24,7 +24,7 @@ Worker подписывает service-account JWT алгоритмом RS256 ч�
 
 AMC8 использует 25 номеров подборки, без распознавания официальных номеров и олимпийского балла. Свободная форма содержит только принятые ответы, включая неверные, и отдельное время неотправленных задач. Пустые темы остаются пустыми. Год запрашивается в диалоге, если не указан в комнате.
 
-Через 72 часа локальный результат и его соответствие экспорта очищаются. **Google-лист остаётся**: cleanup не обращается к Google и не содержит удаления листов.
+Через 28 суток локальный результат и его соответствие экспорта очищаются. **Google-лист остаётся**: cleanup не обращается к Google и не содержит удаления листов.
 
 Официальные источники: [service-account OAuth](https://developers.google.com/identity/protocols/oauth2/service-account), [атомарные batch-запросы](https://developers.google.com/workspace/sheets/api/guides/batch), [developer metadata](https://developers.google.com/workspace/sheets/api/guides/metadata), [форматы ячеек](https://developers.google.com/workspace/sheets/api/reference/rest/v4/spreadsheets/cells).
 

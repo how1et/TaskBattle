@@ -44,6 +44,7 @@ export const attempts = sqliteTable(
     timingVersion: integer('timing_version').notNull().default(1),
     readyId: text('ready_id'),
     resultExpiresAt: integer('result_expires_at'),
+    resultTtlMs: integer('result_ttl_ms'),
     deadlineAt: integer('deadline_at'),
     finishReason: text('finish_reason'),
     finishRequestId: text('finish_request_id'),
@@ -56,8 +57,13 @@ export const attempts = sqliteTable(
     index('attempts_room_start').on(t.roomId, t.startedAt),
     index('attempts_result_expiry').on(t.resultExpiresAt),
     index('attempts_active_deadline').on(t.finishedAt, t.deadlineAt),
+    index('attempts_retention_migration').on(t.resultTtlMs, t.id),
   ],
 );
+export const retentionPolicy = sqliteTable('retention_policy', {
+  key: text('key').primaryKey(),
+  appliedAt: integer('applied_at').notNull(),
+});
 export const answers = sqliteTable(
   'answers',
   {
